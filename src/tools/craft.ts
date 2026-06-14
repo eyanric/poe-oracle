@@ -36,12 +36,15 @@ export function registerCraftCostTool(server: McpServer): void {
             }),
           )
           .describe('Target mods to land. essence auto-targets its forced mod, so it may be empty there.'),
-        method: z.enum(['essence', 'alt-regal', 'chaos-spam', 'fossil', 'bench', 'multimod', 'slam']).describe('Crafting method.'),
+        method: z.enum(['essence', 'alt-regal', 'chaos-spam', 'fossil', 'bench', 'multimod', 'slam', 'harvest']).describe('Crafting method.'),
         essenceName: z.string().optional().describe('Required for method=essence, e.g. "Deafening Essence of Greed".'),
         fossilNames: z.array(z.string()).optional().describe('Required for method=fossil, e.g. ["Pristine Fossil"].'),
         benchMods: z.array(z.string()).optional().describe('Required for method=bench/multimod: bench-craft search terms, e.g. ["maximum Life", "Fire Resistance"].'),
         protect: z.enum(['prefixes', 'suffixes']).optional().describe('method=slam: lock this affix side (cannot be changed) so a miss is recoverable, not a brick.'),
         baseValueChaos: z.number().optional().describe('method=slam: chaos value of the base being slammed (the value-at-risk if it bricks).'),
+        harvestCraft: z.enum(['reforge', 'augment', 'remove']).optional().describe('Required for method=harvest: reforge-with-tag / augment-with-tag / remove-tag.'),
+        harvestTag: z.string().optional().describe('Required for method=harvest: the mod tag, e.g. "life", "fire", "caster".'),
+        blockedGroups: z.array(z.string()).optional().describe('Mod groups already blocked (raises Harvest augment odds — augment reads these).'),
         meta: z
           .object({
             blockAttack: z.boolean().optional(),
@@ -55,8 +58,8 @@ export function registerCraftCostTool(server: McpServer): void {
         league: z.string().optional().describe('League name. Defaults to the current challenge league.'),
       },
     },
-    async ({ baseName, ilvl, desiredMods, method, essenceName, fossilNames, benchMods, protect, baseValueChaos, meta, finishedItemQuery, league }) => {
-      const methodSpec = toMethodSpec(method, { essenceName, fossilNames, benchMods, protect, baseValueChaos })
+    async ({ baseName, ilvl, desiredMods, method, essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag, blockedGroups, meta, finishedItemQuery, league }) => {
+      const methodSpec = toMethodSpec(method, { essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag })
       if ('error' in methodSpec) {
         return { content: [{ type: 'text', text: `**calc_craft_cost** — input error: ${methodSpec.error}` }], isError: true }
       }
@@ -66,6 +69,7 @@ export function registerCraftCostTool(server: McpServer): void {
         desired: desiredMods as DesiredMod[],
         method: methodSpec,
         meta,
+        blockedGroups,
         finishedItemQuery,
       }
       const result = await estimateCraftCostLive(spec, league)
@@ -76,8 +80,12 @@ export function registerCraftCostTool(server: McpServer): void {
 
 function toMethodSpec(
   method: string,
-  o: { essenceName?: string; fossilNames?: string[]; benchMods?: string[]; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number },
+  o: { essenceName?: string; fossilNames?: string[]; benchMods?: string[]; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number; harvestCraft?: 'reforge' | 'augment' | 'remove'; harvestTag?: string },
 ): MethodSpec | { error: string } {
+  if (method === 'harvest') {
+    if (!o.harvestCraft || !o.harvestTag) return { error: 'method=harvest requires harvestCraft + harvestTag' }
+    return { kind: 'harvest', craft: o.harvestCraft, tag: o.harvestTag }
+  }
   if (method === 'essence') {
     if (!o.essenceName) return { error: 'method=essence requires essenceName' }
     return { kind: 'essence', essenceName: o.essenceName }

@@ -23,6 +23,7 @@ import {
 } from './craftingModel'
 import { findBenchCraft, type BenchData, type BenchCraft } from './benchCrafting'
 import { newItemState, withAffix, type ItemState } from './itemState'
+import { harvestModule } from './harvest'
 import type {
   CraftModule, CraftModuleRegistry, CraftDataContext, InputSet, ModuleParams, OutcomeDistribution,
 } from './craftModule'
@@ -54,6 +55,7 @@ export type CraftMethod =
   | { kind: 'bench'; benchMods: string[] }
   | { kind: 'multimod'; benchMods: string[] }
   | { kind: 'slam'; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number }
+  | { kind: 'harvest'; craft: 'reforge' | 'augment' | 'remove'; tag: string }
 
 /**
  * An UNPRICED craft plan the risk engine runs once `craftCost` prices each step's
@@ -362,7 +364,7 @@ function singleItemModule(id: string, title: string, core: (ctx: CraftContext, d
   const evaluate = (inputs: InputSet, data: CraftDataContext, params: ModuleParams): ExpectedAttemptsResult =>
     core(ctxFromState(inputs[0], data), params.desired, params.method)
   return {
-    id, title, arity: 1, evaluate,
+    id, title, arity: 1, respectsLocks: true, evaluate,
     applicable: (inputs, data, params) => { const r = evaluate(inputs, data, params); return { ok: r.supported, reason: r.reason } },
     outcomes: (inputs, data, params) => genericSingleOutcomes(inputs[0], params, evaluate(inputs, data, params)),
     cost: (inputs, data, params) => { const r = evaluate(inputs, data, params); return { steps: stepsFromResult(r), lowConfidence: r.lowConfidence, manualPriceHooks: [] } },
@@ -381,6 +383,7 @@ export const CRAFT_MODULES: CraftModuleRegistry = {
   bench: singleItemModule('bench', 'Bench craft', (ctx, _desired, m) => bench(ctx, m as Extract<CraftMethod, { kind: 'bench' }>)),
   multimod: singleItemModule('multimod', 'Multimod', (ctx, _desired, m) => multimod(ctx, m as Extract<CraftMethod, { kind: 'multimod' }>)),
   slam: singleItemModule('slam', 'Exalt slam', (ctx, desired, m) => slam(ctx, desired, m as Extract<CraftMethod, { kind: 'slam' }>)),
+  harvest: harvestModule,
 }
 
 /** Evaluate a method through its module (the interface entry point for craftCost). */

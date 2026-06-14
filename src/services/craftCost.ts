@@ -38,6 +38,7 @@ export type MethodSpec =
   | { kind: 'bench'; benchMods: string[] }
   | { kind: 'multimod'; benchMods: string[] }
   | { kind: 'slam'; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number }
+  | { kind: 'harvest'; craft: 'reforge' | 'augment' | 'remove'; tag: string }
 
 export interface CraftSpec {
   baseName: string
@@ -45,6 +46,8 @@ export interface CraftSpec {
   desired: DesiredMod[]
   method: MethodSpec
   meta?: MetaMods
+  /** Mod groups already blocked (raises augment odds — Harvest augment reads these). */
+  blockedGroups?: string[]
   /** Optional name to price-check the finished item for the craft-vs-buy verdict. */
   finishedItemQuery?: string
 }
@@ -143,7 +146,7 @@ function resolveMethod(
   deps: CraftDeps,
 ): { method: CraftMethod; desired: DesiredMod[]; error?: string } {
   const m = spec.method
-  if (m.kind === 'alt-regal' || m.kind === 'chaos-spam' || m.kind === 'bench' || m.kind === 'multimod' || m.kind === 'slam') {
+  if (m.kind === 'alt-regal' || m.kind === 'chaos-spam' || m.kind === 'bench' || m.kind === 'multimod' || m.kind === 'slam' || m.kind === 'harvest') {
     return { method: m, desired: spec.desired }
   }
   if (m.kind === 'fossil') {
@@ -204,7 +207,7 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
   if (error) return unsupportedShell(error)
 
   // Compose through the method-module interface: build the item state, evaluate the module.
-  const state = newItemState({ base: base.name, itemClass: base.item_class, ilvl: spec.ilvl, tags: base.tags, meta: spec.meta ?? {} })
+  const state = newItemState({ base: base.name, itemClass: base.item_class, ilvl: spec.ilvl, tags: base.tags, meta: spec.meta ?? {}, blockedGroups: spec.blockedGroups })
   const ev = evaluateMethod(state, { mods: deps.mods, bench: deps.bench }, { desired, method })
   notes.push(...ev.notes)
 

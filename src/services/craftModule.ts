@@ -85,6 +85,13 @@ export interface CraftModule {
   id: string
   title: string
   arity: 1 | 2
+  /**
+   * Does this method respect "prefixes/suffixes cannot be changed" meta-mods?
+   * Bench/slam = true; Harvest reforge = FALSE (it ignores meta-locks and will wipe
+   * "locked" affixes — so `toRiskSteps` must not call such a reforge protected/safe).
+   * Omitted ⇒ true.
+   */
+  respectsLocks?: boolean
   /** Can it act on these inputs/params? (which slots/targets). */
   applicable(inputs: InputSet, ctx: CraftDataContext, params: ModuleParams): Applicability
   /** Resulting item-state DISTRIBUTION of one use (the solver iterates this). */
