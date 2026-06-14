@@ -40,6 +40,9 @@ export type MethodSpec =
   | { kind: 'multimod'; benchMods: string[] }
   | { kind: 'slam'; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number }
   | { kind: 'harvest'; craft: 'reforge' | 'augment' | 'remove'; tag: string }
+  | { kind: 'eldritch-implicit'; tier?: 'lesser' | 'greater' | 'grand' | 'exceptional'; implicitTier?: number }
+  | { kind: 'eldritch-exalt'; dominant: 'exarch' | 'eater' }
+  | { kind: 'eldritch-annul'; dominant: 'exarch' | 'eater' }
 
 export interface CraftSpec {
   baseName: string
@@ -49,6 +52,12 @@ export interface CraftSpec {
   meta?: MetaMods
   /** Mod groups already blocked (raises augment odds — Harvest augment reads these). */
   blockedGroups?: string[]
+  /** Item influence(s) — eldritch ⊥ influence eligibility reads this. */
+  influence?: string[]
+  /** Corrupted items can't take eldritch implicits (eligibility reads this). */
+  corrupted?: boolean
+  /** Existing affixes (eldritch annul reads the dominant side's count). */
+  affixes?: Affix[]
   /** Optional name to price-check the finished item for the craft-vs-buy verdict. */
   finishedItemQuery?: string
 }
@@ -147,7 +156,11 @@ function resolveMethod(
   deps: CraftDeps,
 ): { method: CraftMethod; desired: DesiredMod[]; error?: string } {
   const m = spec.method
-  if (m.kind === 'alt-regal' || m.kind === 'chaos-spam' || m.kind === 'bench' || m.kind === 'multimod' || m.kind === 'slam' || m.kind === 'harvest') {
+  if (
+    m.kind === 'alt-regal' || m.kind === 'chaos-spam' || m.kind === 'bench' || m.kind === 'multimod' ||
+    m.kind === 'slam' || m.kind === 'harvest' ||
+    m.kind === 'eldritch-implicit' || m.kind === 'eldritch-exalt' || m.kind === 'eldritch-annul'
+  ) {
     return { method: m, desired: spec.desired }
   }
   if (m.kind === 'fossil') {
@@ -215,7 +228,7 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
   if (error) return unsupportedShell(error)
 
   // Compose through the method-module interface: build the item state, evaluate the module.
-  const state = newItemState({ base: base.name, itemClass: base.item_class, ilvl: spec.ilvl, tags: base.tags, meta: spec.meta ?? {}, blockedGroups: spec.blockedGroups })
+  const state = newItemState({ base: base.name, itemClass: base.item_class, ilvl: spec.ilvl, tags: base.tags, meta: spec.meta ?? {}, blockedGroups: spec.blockedGroups, influence: spec.influence, corrupted: spec.corrupted, affixes: spec.affixes })
   const ev = evaluateMethod(state, { mods: deps.mods, bench: deps.bench, currentLeague: deps.league }, { desired, method })
   notes.push(...ev.notes)
 

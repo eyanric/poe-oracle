@@ -25,6 +25,7 @@ import { findBenchCraft, type BenchData, type BenchCraft } from './benchCrafting
 import { newItemState, withAffix, type ItemState } from './itemState'
 import { harvestModule } from './harvest'
 import { recombineModule } from './recombine'
+import { eldritchImplicitModule, eldritchExaltModule, eldritchAnnulModule, type EldritchSide, type EldritchTier } from './eldritch'
 import { isLeagueActive } from './craftModule'
 import type {
   CraftModule, CraftModuleRegistry, CraftDataContext, InputSet, ModuleParams, OutcomeDistribution,
@@ -59,6 +60,12 @@ export type CraftMethod =
   | { kind: 'slam'; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number }
   | { kind: 'harvest'; craft: 'reforge' | 'augment' | 'remove'; tag: string }
   | { kind: 'recombine' }
+  /** Roll a specific eldritch implicit. `tier` picks the ember/ichor (default exceptional);
+   *  `implicitTier` optionally pins a value tier (1=highest). Side = desired slot (prefix=Exarch). */
+  | { kind: 'eldritch-implicit'; tier?: EldritchTier; implicitTier?: number }
+  /** Dominance-targeting orbs act on the dominant side's EXPLICIT pool (Exarch=prefix, Eater=suffix). */
+  | { kind: 'eldritch-exalt'; dominant: EldritchSide }
+  | { kind: 'eldritch-annul'; dominant: EldritchSide }
 
 /**
  * An UNPRICED craft plan the risk engine runs once `craftCost` prices each step's
@@ -400,6 +407,9 @@ export const CRAFT_MODULES: CraftModuleRegistry = {
   slam: singleItemModule('slam', 'Exalt slam', (ctx, desired, m) => slam(ctx, desired, m as Extract<CraftMethod, { kind: 'slam' }>)),
   harvest: harvestModule,
   recombine: recombineModule,
+  'eldritch-implicit': eldritchImplicitModule,
+  'eldritch-exalt': eldritchExaltModule,
+  'eldritch-annul': eldritchAnnulModule,
 }
 
 /**

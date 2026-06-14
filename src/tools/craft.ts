@@ -36,7 +36,7 @@ export function registerCraftCostTool(server: McpServer): void {
             }),
           )
           .describe('Target mods to land. essence auto-targets its forced mod, so it may be empty there.'),
-        method: z.enum(['essence', 'alt-regal', 'chaos-spam', 'fossil', 'bench', 'multimod', 'slam', 'harvest']).describe('Crafting method.'),
+        method: z.enum(['essence', 'alt-regal', 'chaos-spam', 'fossil', 'bench', 'multimod', 'slam', 'harvest', 'eldritch-implicit', 'eldritch-exalt', 'eldritch-annul']).describe('Crafting method.'),
         essenceName: z.string().optional().describe('Required for method=essence, e.g. "Deafening Essence of Greed".'),
         fossilNames: z.array(z.string()).optional().describe('Required for method=fossil, e.g. ["Pristine Fossil"].'),
         benchMods: z.array(z.string()).optional().describe('Required for method=bench/multimod: bench-craft search terms, e.g. ["maximum Life", "Fire Resistance"].'),
@@ -44,6 +44,12 @@ export function registerCraftCostTool(server: McpServer): void {
         baseValueChaos: z.number().optional().describe('method=slam: chaos value of the base being slammed (the value-at-risk if it bricks).'),
         harvestCraft: z.enum(['reforge', 'augment', 'remove']).optional().describe('Required for method=harvest: reforge-with-tag / augment-with-tag / remove-tag.'),
         harvestTag: z.string().optional().describe('Required for method=harvest: the mod tag, e.g. "life", "fire", "caster".'),
+        eldritchTier: z.enum(['lesser', 'greater', 'grand', 'exceptional']).optional().describe('method=eldritch-implicit: ember/ichor tier (default exceptional = full pool). Side is the desired mod slot (prefix=Exarch, suffix=Eater).'),
+        eldritchImplicitTier: z.number().optional().describe('method=eldritch-implicit: pin a value tier (1=highest).'),
+        dominant: z.enum(['exarch', 'eater']).optional().describe('Required for method=eldritch-exalt/annul: which eldritch implicit is dominant (Exarch acts on prefixes, Eater on suffixes).'),
+        influence: z.array(z.string()).optional().describe('Item influence(s). eldritch ⊥ influence — influenced items are rejected for eldritch methods.'),
+        corrupted: z.boolean().optional().describe('Corrupted items cannot take eldritch implicits.'),
+        affixes: z.array(z.object({ slot: slotEnum, group: z.string().optional(), modId: z.string().optional(), label: z.string().optional() })).optional().describe('Existing affixes (eldritch annul reads the dominant side count).'),
         blockedGroups: z.array(z.string()).optional().describe('Mod groups already blocked (raises Harvest augment odds — augment reads these).'),
         meta: z
           .object({
@@ -58,8 +64,8 @@ export function registerCraftCostTool(server: McpServer): void {
         league: z.string().optional().describe('League name. Defaults to the current challenge league.'),
       },
     },
-    async ({ baseName, ilvl, desiredMods, method, essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag, blockedGroups, meta, finishedItemQuery, league }) => {
-      const methodSpec = toMethodSpec(method, { essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag })
+    async ({ baseName, ilvl, desiredMods, method, essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag, eldritchTier, eldritchImplicitTier, dominant, influence, corrupted, affixes, blockedGroups, meta, finishedItemQuery, league }) => {
+      const methodSpec = toMethodSpec(method, { essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag, eldritchTier, eldritchImplicitTier, dominant })
       if ('error' in methodSpec) {
         return { content: [{ type: 'text', text: `**calc_craft_cost** — input error: ${methodSpec.error}` }], isError: true }
       }
@@ -70,6 +76,9 @@ export function registerCraftCostTool(server: McpServer): void {
         method: methodSpec,
         meta,
         blockedGroups,
+        influence,
+        corrupted,
+        affixes: affixes?.map(a => ({ slot: a.slot, group: a.group ?? a.modId ?? a.label ?? 'x', modId: a.modId ?? a.group ?? a.label ?? 'x', label: a.label })) as CraftSpec['affixes'],
         finishedItemQuery,
       }
       const result = await estimateCraftCostLive(spec, league)
@@ -146,8 +155,21 @@ function renderRecombine(r: RecombineEstimate): string {
 
 function toMethodSpec(
   method: string,
-  o: { essenceName?: string; fossilNames?: string[]; benchMods?: string[]; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number; harvestCraft?: 'reforge' | 'augment' | 'remove'; harvestTag?: string },
+  o: {
+    essenceName?: string; fossilNames?: string[]; benchMods?: string[]; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number;
+    harvestCraft?: 'reforge' | 'augment' | 'remove'; harvestTag?: string;
+    eldritchTier?: 'lesser' | 'greater' | 'grand' | 'exceptional'; eldritchImplicitTier?: number; dominant?: 'exarch' | 'eater';
+  },
 ): MethodSpec | { error: string } {
+  if (method === 'eldritch-implicit') return { kind: 'eldritch-implicit', tier: o.eldritchTier, implicitTier: o.eldritchImplicitTier }
+  if (method === 'eldritch-exalt') {
+    if (!o.dominant) return { error: 'method=eldritch-exalt requires dominant (exarch|eater)' }
+    return { kind: 'eldritch-exalt', dominant: o.dominant }
+  }
+  if (method === 'eldritch-annul') {
+    if (!o.dominant) return { error: 'method=eldritch-annul requires dominant (exarch|eater)' }
+    return { kind: 'eldritch-annul', dominant: o.dominant }
+  }
   if (method === 'harvest') {
     if (!o.harvestCraft || !o.harvestTag) return { error: 'method=harvest requires harvestCraft + harvestTag' }
     return { kind: 'harvest', craft: o.harvestCraft, tag: o.harvestTag }
