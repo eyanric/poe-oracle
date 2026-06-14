@@ -155,8 +155,8 @@ describe('hedgedVerdict — brick override (unit)', () => {
   const buy: BuySide = { source: 'rare-comparables', label: 'finished', lowChaos: 1000, medianChaos: 1200, confidence: 'high' }
   it('a material brick flips an EV-cheaper craft to buy, citing value-at-risk', () => {
     const risk = {
-      distribution: { mean: 500, p50: 400, p90: 900, p95: 1100, method: 'monte-carlo' as const },
-      determinism: { score: 0.1, guaranteedCost: 100, probabilisticCost: 400, brickPenalty: 0.8 },
+      distribution: { mean: 500, std: 450, p50: 400, p90: 900, p95: 1100, method: 'monte-carlo' as const },
+      determinism: { score: 0.1, cv: 0.9, std: 450, mean: 500, brickPenalty: 0.8, guaranteedCost: 100, probabilisticCost: 400 },
       bricks: [{ label: 'Exalt slam', failureProb: 0.8, valueAtRisk: 105 }],
       category: 'high-brick' as const,
       notes: [],

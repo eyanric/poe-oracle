@@ -69,6 +69,8 @@ function geomSample(p: number, rng: () => number): number {
 
 export interface CostDistribution {
   mean: number
+  /** Standard deviation of total cost — drives the CV-based determinism score. */
+  std: number
   p50: number
   p90: number
   p95: number
@@ -132,14 +134,16 @@ export function costDistribution(plan: CraftPlan, opts: { seed?: number; trials?
   // Point: everything guaranteed.
   if (kt.length === 0 && !hasBrick(plan)) {
     const c = fixedSum(plan)
-    return { mean: c, p50: c, p90: c, p95: c, method: 'point' }
+    return { mean: c, std: 0, p50: c, p90: c, p95: c, method: 'point' }
   }
   // Closed-form: exactly one geometric step + fixed terminals, no bricks.
   if (kt.length === 1 && !hasBrick(plan)) {
     const { p, costPerAttempt } = kt[0]
     const base = fixedSum(plan)
     const at = (q: number) => base + geomQuantileAttempts(p, q) * costPerAttempt
-    return { mean: planMean(plan), p50: at(0.5), p90: at(0.9), p95: at(0.95), method: 'closed-form' }
+    // Var(cost) = c² · Var(N), N ~ Geometric(p) ⇒ std = c · sqrt(1-p)/p.
+    const std = p > 0 ? costPerAttempt * Math.sqrt(1 - p) / p : Infinity
+    return { mean: planMean(plan), std, p50: at(0.5), p90: at(0.9), p95: at(0.95), method: 'closed-form' }
   }
   // Monte Carlo: compound sequences / bricks.
   const trials = opts.trials ?? 10_000
@@ -148,7 +152,9 @@ export function costDistribution(plan: CraftPlan, opts: { seed?: number; trials?
   for (let i = 0; i < trials; i++) costs[i] = simulateOnce(plan, rng)
   costs.sort((a, b) => a - b)
   const pct = (q: number) => costs[Math.min(trials - 1, Math.floor(q * trials))]
-  return { mean: costs.reduce((a, b) => a + b, 0) / trials, p50: pct(0.5), p90: pct(0.9), p95: pct(0.95), method: 'monte-carlo', trials }
+  const mean = costs.reduce((a, b) => a + b, 0) / trials
+  const std = Math.sqrt(costs.reduce((a, b) => a + (b - mean) ** 2, 0) / trials)
+  return { mean, std, p50: pct(0.5), p90: pct(0.9), p95: pct(0.95), method: 'monte-carlo', trials }
 }
 
 // ── Determinism + bricks ──────────────────────────────────────────────────────
@@ -161,12 +167,16 @@ export interface BrickPoint {
 }
 
 export interface DeterminismBreakdown {
-  /** 1 = fully deterministic, 0 = pure gamble. */
+  /** 1 = fully deterministic, → 0 = pure gamble. Based on cost-outcome randomness (CV). */
   score: number
+  /** Coefficient of variation (std/mean) of the cost distribution — the main input. */
+  cv: number
+  std: number
+  mean: number
+  /** P(at least one brick on a single pass) — keeps catastrophic tails reflected. */
+  brickPenalty: number
   guaranteedCost: number
   probabilisticCost: number
-  /** P(at least one brick on a single pass). */
-  brickPenalty: number
 }
 
 export type RiskCategory = 'deterministic' | 'grind' | 'gamble' | 'high-brick'
@@ -191,24 +201,36 @@ export function brickPoints(plan: CraftPlan): BrickPoint[] {
   return out
 }
 
-export function determinism(plan: CraftPlan): DeterminismBreakdown {
+/**
+ * Determinism re-based on the COST-OUTCOME randomness (coefficient of variation), not
+ * just "how much spend is locked in": score = (1 − brickPenalty) / (1 + CV). CV 0 →
+ * 1.0 (essence), moderate CV → mid (grind), brick's fat tail (wide CV) × brickPenalty
+ * → low. Inputs (cv/std/mean/brickPenalty) exposed. Pass the already-computed
+ * distribution to avoid recomputing the Monte Carlo.
+ */
+export function determinism(plan: CraftPlan, dist?: CostDistribution): DeterminismBreakdown {
+  const d = dist ?? costDistribution(plan)
   let guaranteed = 0
   let probabilistic = 0
   for (const s of plan.steps) {
     if (s.kind === 'fixed') guaranteed += s.cost
     else probabilistic += stepMean(s)
   }
-  const total = guaranteed + probabilistic
   const brickPenalty = 1 - plan.steps
     .filter((s): s is SlamStep => s.kind === 'slam' && !s.recoverable)
     .reduce((a, s) => a * s.pSuccess, 1)
-  const share = total > 0 ? guaranteed / total : 1
-  return { score: Number((share * (1 - brickPenalty)).toFixed(3)), guaranteedCost: guaranteed, probabilisticCost: probabilistic, brickPenalty }
+  const cv = d.mean > 0 ? d.std / d.mean : 0
+  const score = Math.max(0, Math.min(1, (1 - brickPenalty) / (1 + cv)))
+  return {
+    score: Number(score.toFixed(3)),
+    cv: Number(cv.toFixed(3)), std: d.std, mean: d.mean, brickPenalty,
+    guaranteedCost: guaranteed, probabilisticCost: probabilistic,
+  }
 }
 
 export function riskProfile(plan: CraftPlan, opts: { seed?: number; trials?: number } = {}): RiskProfile {
   const distribution = costDistribution(plan, opts)
-  const det = determinism(plan)
+  const det = determinism(plan, distribution)
   const bricks = brickPoints(plan)
   const notes: string[] = []
 

@@ -77,19 +77,25 @@ describe('costDistribution', () => {
   })
 })
 
-describe('determinism', () => {
-  it('1.0 for a fully guaranteed craft (essence)', () => {
-    expect(determinism(essencePlan).score).toBe(1)
+describe('determinism (CV-based)', () => {
+  it('1.0 for a fully guaranteed craft (essence): CV 0', () => {
+    const d = determinism(essencePlan)
+    expect(d.score).toBe(1)
+    expect(d.cv).toBe(0)
   })
-  it('low for a grind (most cost is the variable step)', () => {
+  it('a grind reads mid — between brick and deterministic — driven by CV', () => {
     const d = determinism(altSpamPlan)
-    expect(d.score).toBeCloseTo(1 / 6, 2) // regal 1 of total 6
+    // CV = std/mean = (1·sqrt(.8)/.2) / 6 ≈ 0.745 ⇒ score = 1/1.745 ≈ 0.573
+    expect(d.cv).toBeCloseTo(0.745, 2)
+    expect(d.score).toBeCloseTo(0.573, 2)
+    expect(d.score).toBeLessThan(1)
     expect(d.brickPenalty).toBe(0)
   })
-  it('pushed toward 0 by brick presence', () => {
-    const d = determinism(slamPlan)
+  it('pushed toward 0 by brick presence (penalty × fat tail)', () => {
+    const d = determinism(slamPlan, costDistribution(slamPlan, { seed: 1, trials: 5000 }))
     expect(d.brickPenalty).toBeCloseTo(0.8, 6) // 1 - pSuccess
-    expect(d.score).toBeLessThan(0.25)
+    expect(d.score).toBeLessThan(0.2)
+    expect(d.score).toBeLessThan(determinism(altSpamPlan).score) // brick < grind
   })
 })
 
