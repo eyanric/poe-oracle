@@ -28,8 +28,11 @@ export interface RepoeMod {
   type: string
   is_essence_only: boolean
   spawn_weights: SpawnWeight[]
+  /** Per-tag PERCENT multiplier applied to the matched spawn weight (first match wins). */
   generation_weights?: SpawnWeight[]
+  /** Tags the mod itself carries — incl. `attack`/`caster` (drives meta-mod blocks). */
   implicit_tags?: string[]
+  /** Tags the mod ADDS to the item once present (e.g. `has_attack_mod`). */
   adds_tags?: string[]
 }
 
@@ -40,6 +43,7 @@ export interface RepoeBaseItem {
   tags: string[]
   release_state: string
   implicits?: string[]
+  drop_level?: number
 }
 
 export interface RepoeEssence {
@@ -48,14 +52,36 @@ export interface RepoeEssence {
   level: number
   /** item_class → forced mod id */
   mods: Record<string, string>
+  type?: { tier: number; is_corruption_only: boolean }
 }
 
 export interface RepoeFossil {
   name: string
   added_mods: string[]
   forced_mods: string[]
+  /** Tags whose mods are boosted — weight is a PERCENT multiplier (1000 = ×10). */
   positive_mod_weights: SpawnWeight[]
+  /** Tags whose mods are suppressed — weight 0 = cannot roll that tag. */
   negative_mod_weights: SpawnWeight[]
+  /** When non-empty, ONLY mods carrying one of these tags can roll. */
+  allowed_tags?: string[]
+  /** Mods carrying any of these tags cannot roll. */
+  forbidden_tags?: string[]
+}
+
+export interface RepoeItemClass {
+  name: string
+  category?: string
+  influence_tags?: string[]
+}
+
+/** A Horticrafting/bench option — its `actions` carry an `add_mod` for craftable mods. */
+export interface RepoeBenchOption {
+  master?: string
+  bench_tier?: number
+  item_classes: string[]
+  actions: { add_mod?: string; [k: string]: unknown }
+  cost?: Record<string, number>
 }
 
 const fileUrl = (name: string): string => `${REPOE_BASE}/${name}.min.json`
@@ -68,6 +94,34 @@ export const getEssences = (o?: FetchJsonOptions): Promise<Record<string, RepoeE
   fetchJson(fileUrl('essences'), o)
 export const getFossils = (o?: FetchJsonOptions): Promise<Record<string, RepoeFossil>> =>
   fetchJson(fileUrl('fossils'), o)
+export const getItemClasses = (o?: FetchJsonOptions): Promise<Record<string, RepoeItemClass>> =>
+  fetchJson(fileUrl('item_classes'), o)
+export const getBenchOptions = (o?: FetchJsonOptions): Promise<RepoeBenchOption[]> =>
+  fetchJson(fileUrl('crafting_bench_options'), o)
+
+/**
+ * Fossils export is keyed by metadata path (445 entries) but most are empty
+ * placeholders; only ~25 are real player fossils. Collapse to one entry per
+ * distinct fossil NAME, preferring the record that actually carries effects.
+ */
+export function dedupeFossilsByName(
+  fossils: Record<string, RepoeFossil>,
+): Map<string, RepoeFossil> {
+  const hasEffect = (f: RepoeFossil): boolean =>
+    (f.added_mods?.length ?? 0) > 0 ||
+    (f.forced_mods?.length ?? 0) > 0 ||
+    (f.positive_mod_weights?.length ?? 0) > 0 ||
+    (f.negative_mod_weights?.length ?? 0) > 0 ||
+    (f.allowed_tags?.length ?? 0) > 0 ||
+    (f.forbidden_tags?.length ?? 0) > 0
+  const out = new Map<string, RepoeFossil>()
+  for (const f of Object.values(fossils)) {
+    if (!f?.name) continue
+    const existing = out.get(f.name)
+    if (!existing || (!hasEffect(existing) && hasEffect(f))) out.set(f.name, f)
+  }
+  return out
+}
 
 export interface RepoeFreshness {
   ok: boolean
