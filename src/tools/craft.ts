@@ -126,6 +126,16 @@ function render(r: CraftCostEstimate): string {
       (r.totalDivine != null ? `  ≈ **${r.totalDivine.toFixed(2)} div**` : ''),
   )
 
+  if (r.risk) {
+    const d = r.risk.distribution
+    lines.push(
+      `**Cost distribution:** expected ${money(d.mean, r.divineChaos)} · p50 ${money(d.p50, r.divineChaos)} · ` +
+        `p90 ${money(d.p90, r.divineChaos)} · p95 ${money(d.p95, r.divineChaos)} _(${d.method})_`,
+      `**Risk:** ${r.risk.category.toUpperCase()} · determinism ${r.risk.determinism.score.toFixed(2)}` +
+        r.risk.bricks.map(b => ` · ⚠ ${b.label} ${(b.failureProb * 100).toFixed(0)}% brick risking ${money(b.valueAtRisk, r.divineChaos)}`).join(''),
+    )
+  }
+
   if (r.buySide) {
     const b = r.buySide
     lines.push(
@@ -139,7 +149,7 @@ function render(r: CraftCostEstimate): string {
       : v.decision === 'buy-likely-cheaper' ? '🔴 BUY likely cheaper'
         : v.decision === 'overlapping' ? '🟡 OVERLAPPING — no clear edge'
           : '⚪ UNKNOWN'
-  lines.push(`**Verdict:** ${tag} (${v.confidence} conf) — ${v.rationale}`)
+  lines.push(`**Verdict:** ${tag}${v.riskAdjusted ? ' (risk-adjusted)' : ''} (${v.confidence} conf) — ${v.rationale}`)
 
   if (r.lowConfidence) lines.push('', `⚠ **${'LOW CONFIDENCE'}** — trust the divine figures over chaos micro-prices.`)
   if (r.notes.length) {

@@ -25,6 +25,7 @@ import { expectedAttempts, type CraftContext, type CraftMethod, type DesiredMod 
 import { buildSlotPool, type MetaMods } from './craftingModel'
 import { computePseudoTotals } from './pseudoMods'
 import { estimateRarePriceLive, type RareItemSpec } from './rarePricing'
+import { riskProfile, type RiskProfile, type RiskCategory, type CraftPlan, type CraftStep } from './craftRisk'
 
 export type MethodSpec =
   | { kind: 'essence'; essenceName: string }
@@ -66,11 +67,18 @@ export interface BuySide {
 export interface HedgedVerdict {
   decision: 'craft-likely-cheaper' | 'buy-likely-cheaper' | 'overlapping' | 'unknown'
   craftChaos: number | null
+  /** p90 (unlucky-tail) craft cost — the verdict accounts for variance, not just EV. */
+  p90Chaos: number | null
   buyLowChaos: number | null
   buyMedianChaos: number | null
   /** Crisp margin ONLY when both sides are confident AND non-overlapping; else null. */
   marginChaos: number | null
   confidence: 'low' | 'medium' | 'high'
+  /** Risk category of the craft side, when computed. */
+  riskCategory: RiskCategory | null
+  /** True when variance/brick risk overrode the EV-based lean. */
+  riskAdjusted: boolean
+  riskNote: string | null
   rationale: string
 }
 
@@ -89,6 +97,8 @@ export type CraftCostEstimate = {
   totalDivine: number | null
   divineChaos: number | null
   buySide: BuySide | null
+  /** Cost distribution + determinism + brick analysis (null if cost couldn't be priced). */
+  risk: RiskProfile | null
   verdict: HedgedVerdict
   lowConfidence: boolean
   notes: string[]
@@ -173,8 +183,8 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
   const unsupportedShell = (reason: string): CraftCostEstimate => ({
     league: deps.league, stampDate, base: spec.baseName, ilvl: spec.ilvl, method: spec.method.kind,
     supported: false, reason, expectedAttempts: Infinity, perAttemptProb: 0, consumables: [],
-    totalChaos: null, totalDivine: null, divineChaos, buySide: deps.buySide ?? null,
-    verdict: { decision: 'unknown', craftChaos: null, buyLowChaos: null, buyMedianChaos: null, marginChaos: null, confidence: 'low', rationale: reason },
+    totalChaos: null, totalDivine: null, divineChaos, buySide: deps.buySide ?? null, risk: null,
+    verdict: { decision: 'unknown', craftChaos: null, p90Chaos: null, buyLowChaos: null, buyMedianChaos: null, marginChaos: null, confidence: 'low', riskCategory: null, riskAdjusted: false, riskNote: null, rationale: reason },
     lowConfidence: true, notes,
   })
 
@@ -203,10 +213,14 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
   const totalDivine = totalChaos != null && divineChaos ? totalChaos / divineChaos : null
   if (anyUnpriced) notes.push(`Some consumables had no live price (${consumables.filter(c => c.chaosTotal == null).map(c => c.name).join(', ')}) — total is incomplete.`)
 
-  // ── Hedged craft-vs-buy verdict (buy side pre-resolved by the live wrapper) ──
+  // ── Risk profile: cost distribution + determinism + bricks ────────────────
+  const risk = anyUnpriced ? null : riskProfile(buildPlan(ev, consumables), { seed: 0x5eed })
+  if (risk) notes.push(...risk.notes)
+
+  // ── Hedged + risk-adjusted craft-vs-buy verdict ───────────────────────────
   const craftLow = ev.lowConfidence || consumables.some(c => c.lowConfidence) || anyUnpriced
   const buySide = deps.buySide ?? null
-  const verdict = hedgedVerdict(totalChaos, craftLow, buySide, divineChaos)
+  const verdict = hedgedVerdict(totalChaos, craftLow, buySide, divineChaos, risk)
   // lowConfidence reflects the CRAFT-COST side; the verdict carries its own confidence.
   const lowConfidence = craftLow
   if (lowConfidence) notes.push('LOW CONFIDENCE (craft cost) — prefer the divine-denominated figures; chaos micro-prices and unmodelled affix-count constants make tighter precision unreliable.')
@@ -215,8 +229,26 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
   return {
     league: deps.league, stampDate, base: base.name, ilvl: spec.ilvl, method: ev.method, supported: true,
     expectedAttempts: ev.expectedAttempts, perAttemptProb: ev.perAttemptProb, consumables,
-    totalChaos, totalDivine, divineChaos, buySide, verdict, lowConfidence, notes,
+    totalChaos, totalDivine, divineChaos, buySide, risk, verdict, lowConfidence, notes,
   }
+}
+
+/**
+ * Map a priced method into a risk CraftPlan: the per-attempt consumable (qty scales
+ * with expected attempts, p < 1) becomes a keep-trying step; everything else is a
+ * guaranteed fixed cost. Current methods have no brick steps (those arrive with the
+ * future slam/annul track).
+ */
+function buildPlan(ev: { expectedAttempts: number; perAttemptProb: number }, consumables: PricedConsumable[]): CraftPlan {
+  const steps: CraftStep[] = []
+  for (const c of consumables) {
+    if (c.chaosEach == null) continue
+    const isKeepTrying =
+      ev.perAttemptProb < 1 && Math.abs(c.qty - ev.expectedAttempts) <= Math.max(1e-6, ev.expectedAttempts * 1e-6)
+    if (isKeepTrying) steps.push({ kind: 'keep-trying', label: c.name, p: ev.perAttemptProb, costPerAttempt: c.chaosEach })
+    else steps.push({ kind: 'fixed', label: c.name, cost: c.chaosTotal ?? c.chaosEach })
+  }
+  return { label: 'craft', steps }
 }
 
 function fmtChaos(chaos: number, divineChaos: number | null): string {
@@ -225,46 +257,74 @@ function fmtChaos(chaos: number, divineChaos: number | null): string {
 }
 
 /**
- * Compare the (point) expected craft cost against the buy RANGE and hedge: a crisp
- * margin is only emitted when both sides are confident AND the craft point sits clear
- * of the range. Otherwise "overlapping / no clear edge" or a confidence-capped lean.
+ * Compare the craft cost against the buy RANGE and hedge — now RISK-ADJUSTED: a crisp
+ * margin is only emitted when both sides are confident AND non-overlapping; and even
+ * when EV says craft is cheaper, a p90 craft cost above the buy price OR a material
+ * brick risk flips the call to "buy is the safer play" (and says why — variance/brick).
  */
 export function hedgedVerdict(
   craftChaos: number | null,
   craftLow: boolean,
   buy: BuySide | null,
   divineChaos: number | null,
+  risk?: RiskProfile | null,
 ): HedgedVerdict {
+  const f = (c: number) => fmtChaos(c, divineChaos)
+  const p90 = risk?.distribution.p90 ?? null
+  const riskCategory = risk?.category ?? null
+
   if (craftChaos == null || !buy) {
     return {
-      decision: 'unknown', craftChaos,
+      decision: 'unknown', craftChaos, p90Chaos: p90,
       buyLowChaos: buy?.lowChaos ?? null, buyMedianChaos: buy?.medianChaos ?? null,
-      marginChaos: null, confidence: 'low',
+      marginChaos: null, confidence: 'low', riskCategory, riskAdjusted: false, riskNote: null,
       rationale: !buy ? 'no buy-side price available — craft cost only.' : 'craft total could not be priced — verdict withheld.',
     }
   }
   const { lowChaos, medianChaos } = buy
-  const decision: HedgedVerdict['decision'] =
+  let decision: HedgedVerdict['decision'] =
     craftChaos <= lowChaos ? 'craft-likely-cheaper' : craftChaos >= medianChaos ? 'buy-likely-cheaper' : 'overlapping'
   const confidence: HedgedVerdict['confidence'] =
     craftLow || buy.confidence === 'low' ? 'low' : buy.confidence === 'high' ? 'high' : 'medium'
   const bothConfident = !craftLow && buy.confidence === 'high'
 
-  let marginChaos: number | null = null
-  if (bothConfident && decision === 'craft-likely-cheaper') marginChaos = lowChaos - craftChaos
-  if (bothConfident && decision === 'buy-likely-cheaper') marginChaos = craftChaos - medianChaos
+  // Risk override: even on a favourable EV, variance or a brick can make buying safer.
+  const materialBrick = (risk?.bricks ?? []).some(b => b.failureProb >= 0.05 && b.valueAtRisk > 0)
+  const p90ExceedsBuy = p90 != null && p90 > medianChaos
+  let riskAdjusted = false
+  let riskNote: string | null = null
+  if ((materialBrick || p90ExceedsBuy) && decision !== 'buy-likely-cheaper') {
+    riskAdjusted = true
+    decision = 'buy-likely-cheaper'
+    if (materialBrick) {
+      const b = risk!.bricks[0]
+      riskNote = `brick risk: ${(b.failureProb * 100).toFixed(0)}% chance to lose ${f(b.valueAtRisk)} — buying avoids the catastrophic downside.`
+    } else {
+      riskNote = `p90 craft ${f(p90!)} exceeds the buy price — high variance makes buying the safer play even though expected craft cost is lower.`
+    }
+  } else if (riskCategory === 'high-brick') {
+    riskNote = `unrecoverable brick step present — see value-at-risk.`
+  }
 
-  const f = (c: number) => fmtChaos(c, divineChaos)
+  let marginChaos: number | null = null
+  if (!riskAdjusted && bothConfident && decision === 'craft-likely-cheaper') marginChaos = lowChaos - craftChaos
+  if (!riskAdjusted && bothConfident && decision === 'buy-likely-cheaper') marginChaos = craftChaos - medianChaos
+
   const buyStr = `buy ${f(lowChaos)}–${f(medianChaos)} (${buy.confidence} conf, ${buy.source})`
   const edge = marginChaos != null ? `, ~${f(marginChaos)} edge` : ' (margin not crisp — confidence capped)'
-  const rationale =
-    decision === 'craft-likely-cheaper'
-      ? `craft ~${f(craftChaos)} vs ${buyStr} — craft likely cheaper${edge}.`
-      : decision === 'buy-likely-cheaper'
-        ? `craft ~${f(craftChaos)} vs ${buyStr} — buy likely cheaper${edge}.`
-        : `craft ~${f(craftChaos)} sits inside the ${buyStr} — overlapping, no clear edge.`
+  const p90Str = p90 != null ? ` [p90 ${f(p90)}]` : ''
+  let rationale: string
+  if (riskAdjusted) {
+    rationale = `craft EV ~${f(craftChaos)}${p90Str} vs ${buyStr} — ${riskNote}`
+  } else if (decision === 'craft-likely-cheaper') {
+    rationale = `craft ~${f(craftChaos)}${p90Str} vs ${buyStr} — craft likely cheaper${edge}.`
+  } else if (decision === 'buy-likely-cheaper') {
+    rationale = `craft ~${f(craftChaos)}${p90Str} vs ${buyStr} — buy likely cheaper${edge}.`
+  } else {
+    rationale = `craft ~${f(craftChaos)}${p90Str} sits inside the ${buyStr} — overlapping, no clear edge.`
+  }
 
-  return { decision, craftChaos, buyLowChaos: lowChaos, buyMedianChaos: medianChaos, marginChaos, confidence, rationale }
+  return { decision, craftChaos, p90Chaos: p90, buyLowChaos: lowChaos, buyMedianChaos: medianChaos, marginChaos, confidence, riskCategory, riskAdjusted, riskNote, rationale }
 }
 
 /**

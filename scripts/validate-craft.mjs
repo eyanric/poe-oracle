@@ -34,7 +34,9 @@ ok('essence craft supported', c1.supported, c1.reason)
 ok('expected attempts = 1 (forced mod is 100%)', c1.expectedAttempts === 1)
 ok('total cost = 1 essence, priced live', c1.totalChaos != null && c1.totalChaos > 0, m1(c1.totalChaos))
 ok('not flagged low-confidence (deterministic + indexed essence)', c1.lowConfidence === false)
-console.log(`      forced mod EV: ${c1.expectedAttempts} × essence = ${m1(c1.totalChaos)}\n`)
+ok('risk = deterministic, zero variance, no brick', c1.risk?.category === 'deterministic' && c1.risk?.distribution.p90 === c1.totalChaos && c1.risk?.bricks.length === 0,
+  `det=${c1.risk?.determinism.score}, p90=${m1(c1.risk?.distribution.p90)}`)
+console.log(`      forced mod EV: ${c1.expectedAttempts} × essence = ${m1(c1.totalChaos)} · risk ${c1.risk?.category} (determinism ${c1.risk?.determinism.score})\n`)
 
 // ── Craft 2 — alt → regal, life prefix (the Phase 1 leg, now magic-count aware) ─
 console.log('--- Craft 2: alt→regal Increased Life prefix → Vaal Regalia (ilvl 84) ---')
@@ -51,7 +53,9 @@ ok('alt→regal supported', c2.supported, c2.reason)
 ok('expected alts in a believable band (5–15; > naive 4.9 since occupancy < 1)', c2.expectedAttempts > 4.9 && c2.expectedAttempts < 20, `~${c2.expectedAttempts.toFixed(1)} alts`)
 ok('flagged low-confidence (magic constant + thin orb prices)', c2.lowConfidence === true)
 ok('total cost finite & positive', c2.totalChaos != null && c2.totalChaos > 0, m2(c2.totalChaos) + (c2.totalDivine != null ? ` ≈ ${c2.totalDivine.toFixed(3)} div` : ''))
-console.log(`      P(hit)/alt = ${(c2.perAttemptProb * 100).toFixed(2)}% ⇒ ${c2.expectedAttempts.toFixed(1)} alts + 1 regal = ${m2(c2.totalChaos)}\n`)
+ok('risk = grind, p90 > mean, no brick', c2.risk?.category === 'grind' && c2.risk?.distribution.p90 > c2.risk?.distribution.mean && c2.risk?.bricks.length === 0,
+  `mean=${m2(c2.risk?.distribution.mean)} p90=${m2(c2.risk?.distribution.p90)} (${(c2.risk?.distribution.p90 / c2.risk?.distribution.mean).toFixed(1)}× mean)`)
+console.log(`      P(hit)/alt = ${(c2.perAttemptProb * 100).toFixed(2)}% ⇒ ${c2.expectedAttempts.toFixed(1)} alts + 1 regal = ${m2(c2.totalChaos)} · risk ${c2.risk?.category}, p90 ${m2(c2.risk?.distribution.p90)}\n`)
 
 // ── Craft 3 — craft-vs-buy verdict (essence craft vs a priced finished item) ───
 console.log('--- Craft 3: craft-vs-buy verdict wiring (finished item priced live) ---')

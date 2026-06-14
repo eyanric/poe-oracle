@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { RepoeMod, RepoeBaseItem, RepoeEssence, RepoeFossil } from '../src/data/repoe'
-import { estimateCraftCost, type CraftSpec, type CraftDeps } from '../src/services/craftCost'
+import { estimateCraftCost, hedgedVerdict, type CraftSpec, type CraftDeps, type BuySide } from '../src/services/craftCost'
+import type { RiskProfile } from '../src/services/craftRisk'
 import type { EconomySnapshot, CurrencyPrice, ItemPrice } from '../src/services/economyTypes'
 
 const mod = (m: Partial<RepoeMod> & Pick<RepoeMod, 'generation_type' | 'groups'>): RepoeMod => ({
@@ -119,5 +120,51 @@ describe('estimateCraftCost', () => {
     const r = estimateCraftCost(spec, noClass)
     expect(r.supported).toBe(false)
     expect(r.reason).toMatch(/does not apply/)
+  })
+
+  it('attaches a risk profile to a supported craft', () => {
+    const spec: CraftSpec = {
+      baseName: 'Vaal Regalia', ilvl: 84, desired: [],
+      method: { kind: 'essence', essenceName: 'Deafening Essence of Greed' },
+    }
+    const r = estimateCraftCost(spec, deps)
+    expect(r.risk?.category).toBe('deterministic') // essence
+    expect(r.risk?.distribution.p90).toBe(r.totalChaos) // zero variance
+  })
+
+  it('risk-adjusts the verdict: alt-spam p90 above the buy price flips EV-cheaper → buy', () => {
+    const spec: CraftSpec = {
+      baseName: 'Vaal Regalia', ilvl: 84,
+      desired: [{ slot: 'prefix', group: 'IncreasedLife', label: 'Increased Life' }],
+      method: { kind: 'alt-regal' },
+    }
+    const r = estimateCraftCost(spec, deps) // craft EV ~0.39c, p90 ~0.6c
+    const mean = r.risk!.distribution.mean
+    const p90 = r.risk!.distribution.p90
+    expect(p90).toBeGreaterThan(mean)
+    // buy range straddles mean<low but p90>median → EV says craft, variance says buy
+    const buySide: BuySide = { source: 'rare-comparables', label: 'x', lowChaos: mean + (p90 - mean) * 0.2, medianChaos: (mean + p90) / 2, confidence: 'high' }
+    const v = estimateCraftCost(spec, { ...deps, buySide }).verdict
+    expect(v.decision).toBe('buy-likely-cheaper')
+    expect(v.riskAdjusted).toBe(true)
+    expect(v.riskNote).toMatch(/p90/)
+  })
+})
+
+describe('hedgedVerdict — brick override (unit)', () => {
+  const buy: BuySide = { source: 'rare-comparables', label: 'finished', lowChaos: 1000, medianChaos: 1200, confidence: 'high' }
+  it('a material brick flips an EV-cheaper craft to buy, citing value-at-risk', () => {
+    const risk = {
+      distribution: { mean: 500, p50: 400, p90: 900, p95: 1100, method: 'monte-carlo' as const },
+      determinism: { score: 0.1, guaranteedCost: 100, probabilisticCost: 400, brickPenalty: 0.8 },
+      bricks: [{ label: 'Exalt slam', failureProb: 0.8, valueAtRisk: 105 }],
+      category: 'high-brick' as const,
+      notes: [],
+    } satisfies RiskProfile
+    const v = hedgedVerdict(500, false, buy, 100, risk) // craft 500 < buyLow 1000 → EV says craft
+    expect(v.decision).toBe('buy-likely-cheaper')
+    expect(v.riskAdjusted).toBe(true)
+    expect(v.riskNote).toMatch(/brick risk/)
+    expect(v.marginChaos).toBeNull()
   })
 })
