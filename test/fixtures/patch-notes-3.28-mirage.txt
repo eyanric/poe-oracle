@@ -1,0 +1,82 @@
+Content Update 3.28.0 — Path of Exile: Mirage
+
+Mirage League
+- Zones can now contain a Mirage portal leading to an astral copy of the area, mirroring its monsters and League mechanics.
+- Varashta allows you to choose one of three Wishes before entering, modifying the Mirage in powerful ways.
+- Monsters slain within a Wished Mirage drop powerful loot, currency for enhancing equipment and gems, special caches, or mysterious coins.
+
+New Skill Gems
+- Divine Blast: Project a beam of holy light from your shield to a targeted location.
+- Holy Hammers: Slam the ground ahead of you, calling down a Holy Hammer from above.
+- Holy Strike: Infuse your weapon with holy energy and swing.
+- Shield of Light: Retaliate against a blocked hit with a sweep of your Shield.
+
+New Support Gems
+- Blessed Call Support: Supports Warcry skills, causing them to create Consecrated Ground.
+- Excommunicate Support: Supports melee attacks, converting a portion of damage to fire and lightning.
+- Exemplar Support: Supports Minion skills.
+- Hallow Support: Supports melee attacks you use yourself.
+
+Exceptional Support Gems
+- Introduced Exceptional Support Gems, a new and improved version of Awakened Support Gems, with over 40 variants obtainable in the endgame.
+
+Skill Gem Balance
+- Sweep has been reworked and renamed to Holy Sweep.
+- Penance Brand now deals 10% more damage with 520-630% added damage effectiveness.
+- Storm Brand has significantly increased damage values.
+- Consecrated Path damage effectiveness increased to 273-468%.
+- Holy Flame Totem now fires 3 to 6 projectiles, up from always 3.
+- Earthshatter effectiveness reduced to 158%-329%, from 171%-393%.
+- Static Strike beam damage reduced to 30% less, from 40% less.
+- Orb of Storms can now be supported by Spell Echo.
+- Portal no longer has its casting interrupted by self-damage.
+
+Unique Items
+- Replica Gifts from Above has been added as a new Replica Unique.
+- Lioneye's Glare: Attacks you use yourself Repeat an additional time.
+- Pledge of Hands: Socketed Gems are Supported by Level 1 Greater Spell Echo.
+- Essentia Sanguis lightning damage and energy shield have been significantly increased.
+- Bino's Kitchen Knife poison spread radius increased; now grants chaos resistance.
+- Voltaxic Rift now treats enemy monster Chaos Resistance values as inverted.
+- Marohi Erqi area of effect increased by 40-50%.
+- Shaper's Touch accuracy per Intelligence reduced to +2 per 2, from +4 per 2.
+- The Bloodnotch recovery from stunning hits reduced to 20-30%, from 40-60%.
+
+Atlas of Worlds
+- Map items are no longer associated with a specific Map Area.
+- The structure of the Atlas has changed; you now begin your exploration at the centre.
+- Using an Astrolabe on a Map manifests a Shaped Region in that quadrant, applying modifiers across multiple maps.
+- Voidstones now upgrade the minimum Map Tier of Maps within that Atlas Quadrant to 16.
+- You now receive Voidstones from killing both the Searing Exarch and the Eater of Worlds.
+- The Favoured Map system has been removed.
+- Kirac Atlas Missions have been discontinued.
+- Added 25 maps back to the Atlas, including Shrine, Fungal Hollow, Carcass, Relic Chambers, and Graveyard.
+- Completing a Unique Map grants 1 Atlas Skill Point, up to a maximum of 10.
+
+Keepers of the Flame
+- Breach Hives and Unstable Breaches now spawn in areas from Act 6 Mud Flats onwards.
+- Breachstones are now non-functional and can be traded to a vendor for a Hivebrain Gland.
+- Flesh of Xesht transforms a Breach Unique to its alternate version.
+
+Currency
+- Coin of Knowledge corrupts a level 20 Skill Gem, imbuing it with a random valid Intelligence Support effect.
+- Coin of Power corrupts a Skill Gem with a random valid Strength Support effect.
+- Coin of Skill corrupts a Skill Gem with a random valid Dexterity Support effect.
+- Cartographer's Chisels can no longer be obtained.
+- Engineer's Orbs, Harbinger's Orbs, and Orbs of Horizons can no longer be obtained.
+- Currency Items now account for a significantly larger portion of dropped items.
+- Non-Unique Equipment items are approximately 6% less common.
+- Exalted and Regal Orbs will now be comparatively more common.
+- Crafting bench costs have been standardized and now generally cost 4 Exalted Orbs.
+- The vendor recipe for influenced items now returns 1 Exalted Orb instead of 2 Exalted Shards.
+
+Ascendancy Classes
+- Added the Reliquarian, a new Scion Ascendancy.
+- Guardian gains a new Marshal of Divinity notable.
+- Chieftain's Hinekora explosion chance increased to 10%, from 5%.
+- Warden's Avatar of the Wilds elemental damage increased to 100%, from 80%.
+
+Map and Endgame Balance
+- Map quality now grants +10% Item Quantity at 20% Quality, reduced from +20%.
+- Increased the drop rate of several Scarabs, including Ambush, Anarchy, Essence, and Domination.
+- Sulphite Infusion gains have been doubled at all tiers.

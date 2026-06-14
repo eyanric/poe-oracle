@@ -57,3 +57,26 @@ export async function fetchJson<T>(url: string, opts: FetchJsonOptions = {}): Pr
   if (ttl > 0) cache.set(url, { data, expiresAt: Date.now() + ttl })
   return data
 }
+
+/**
+ * Fetch raw text (HTML or plaintext) with the same URL-keyed TTL cache. Unlike
+ * `fetchJson`, this does NOT reject HTML — patch notes are HTML/forum pages that a
+ * service-layer parser normalizes. Caching is shared with `fetchJson` (URL-keyed),
+ * so don't fetch the same URL as both JSON and text.
+ */
+export async function fetchText(url: string, opts: FetchJsonOptions = {}): Promise<string> {
+  const ttl = opts.ttlMs ?? DEFAULT_TTL_MS
+  const hit = cache.get(url)
+  if (hit && Date.now() < hit.expiresAt) return hit.data as string
+
+  const doFetch = opts.fetchImpl ?? fetch
+  const res = await doFetch(url, {
+    headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,text/plain,*/*', ...opts.headers },
+  })
+  if (!res.ok) throw new Error(`fetchText ${url}: HTTP ${res.status}`)
+
+  const text = await res.text()
+  if (!text.trim()) throw new Error(`fetchText ${url}: empty response`)
+  if (ttl > 0) cache.set(url, { data: text, expiresAt: Date.now() + ttl })
+  return text
+}
