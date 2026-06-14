@@ -23,6 +23,7 @@
     "test": "vitest run",
     "test:ui": "vitest --ui",
     "validate:repoe": "node scripts/validate-repoe.mjs",
+    "validate:ev": "tsx scripts/ev-sanity.mjs",
     "check": "npm run typecheck && npm run lint && npm test"
   },
   "dependencies": {

@@ -2,11 +2,18 @@
 
 **Gate:** crafting-EV rides entirely on mod spawn weights. Bad data → confidently-wrong EV,
 which is worse than no tool. This validates the data source is **live**, **current-patch**, and
-**numerically sound** before any of it is ported into `@poe-core` (Phase 1).
+**numerically sound** before the full RePoE port + `calc_craft_cost` (Track A).
 
-**Harness:** [`packages/poe-mcp/scripts/validate-repoe.mjs`](../packages/poe-mcp/scripts/validate-repoe.mjs)
-— `node packages/poe-mcp/scripts/validate-repoe.mjs` (exits non-zero on any failure).
-**Last run:** 2026-06-13 — **20/20 checks PASS**.
+**Data-layer loader:** [`src/data/repoe.ts`](../src/data/repoe.ts) — typed getters on the `fetchJson`
+cache, pointed at `repoe-fork.github.io`. The two harnesses below run on top of it.
+
+**Harnesses:**
+- [`scripts/validate-repoe.mjs`](../scripts/validate-repoe.mjs) — `npm run validate:repoe`: structure,
+  freshness, weight normalization, ilvl gating, essence determinism (**20/20 PASS**).
+- [`scripts/ev-sanity.mjs`](../scripts/ev-sanity.mjs) — `npm run validate:ev`: **live** EV cross-check
+  composing the loader + economy services (orbs/finished-item priced via poe.watch/poe.ninja).
+
+**Last run:** 2026-06-14 — patch **3.28 Mirage**, all checks PASS.
 
 ---
 
@@ -55,14 +62,34 @@ which is worse than no tool. This validates the data source is **live**, **curre
 
 ---
 
-## Honest limits of this validation (and what Phase 1/2 must add)
+## EV sanity (live, Phase 1) — `npm run validate:ev`
 
-- **No Craft-of-Exile numeric scrape.** CoE is JS-rendered and not reliably fetchable as text. Case B's 1/N is validated against the *mechanic* (equal weights) and known community facts (13 life tiers; essence-of-greed → life), not a screen-scraped CoE figure. The full **EV-vs-live-trade-price** cross-check is deferred to **Phase 2**, where pricing enters and "craft vs buy" can be checked end-to-end.
-- **The harness uses a minimal weight slice** (domain match, first-matching `spawn_weights` tag, `generation_weights` multiplier, `required_level` gate, `is_essence_only` exclusion). Phase 1 must additionally handle, **with tests**:
+Composes the `data/repoe` loader + the economy services to cross-check first-pass
+expected-attempts/cost. Run 2026-06-14, league Mirage — all PASS:
+
+- **Live price leg:** Divine 526c · Orb of Alteration 0.08c · Regal 0.08c · Headhunter 4747c (≈9 div)
+  all price live — the economy data the cost model depends on is working end-to-end.
+- **Case 1 — essence slam (deterministic):** Deafening Essence of Greed forces `IncreasedLife11`
+  ⇒ expected attempts = **1** (CoE oracle: a forced mod is 100%); EV = 1 × 3.4c = **3.4c**.
+- **Case 2 — alt→regal, Increased Life prefix (Vaal Regalia, ilvl 84):** life = **20.3%** of prefix
+  weight ⇒ **~4.9 alts** to roll it as a prefix; EV ≈ 4.9×0.08c + 0.1c ≈ **0.5c**. Believable —
+  life is a common, high-weight prefix. *First-pass: ignores magic 1-vs-2-mod weighting.*
+
+⚠ **Orb micro-price caveat:** Orb of Alteration and Regal both report 0.08c (equal) — in a
+divine-dominated economy chaos is a micro-unit, but equal values hint at thin/low-confidence orb
+data. `calc_craft_cost` (Track A) must consume the `lowConfidence` flags and prefer divine-denominated
+sums for any spend-worthy number.
+
+---
+
+## Honest limits of this validation (and what Track A must add)
+
+- **No Craft-of-Exile numeric scrape.** CoE is JS-rendered and not reliably fetchable as text. Case B's 1/N and Case 1's 100% are validated against the *mechanic* (equal weights / forced mod) and known community facts (13 life tiers; essence-of-greed → life), plus the live EV harness above — not a screen-scraped CoE figure.
+- **The harness uses a minimal weight slice** (domain match, first-matching `spawn_weights` tag, `generation_weights` multiplier, `required_level` gate, `is_essence_only` exclusion). Track A's full port must additionally handle, **with tests**:
   - mod-**group exclusivity** across the whole item (can't roll two mods from one group),
   - prefix/suffix **slot caps** (3/3 on rares) and magic-item mod-count weighting,
   - **meta-mods** ("cannot roll X", multimod) reweighting the pool,
   - **influence / fractured / essence / fossil** weighting vs plain alch/chaos,
   - **fossils dedupe** (445 metadata entries → 26 real fossils).
 
-**Verdict:** the data source is live, current (3.28 Mirage, regenerated today), structurally complete, and numerically consistent for the weight model. **Cleared to proceed to Phase 1** (RePoE port into `@poe-core`).
+**Verdict:** the data source is live, current (3.28 Mirage, exports regenerated 2026-06-13), structurally complete, numerically consistent for the weight model, and the live EV pipeline produces believable first-pass numbers. **Cleared to proceed to Track A** (full RePoE port + `calc_craft_cost`) — pending the user's go.
