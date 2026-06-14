@@ -43,6 +43,8 @@ export type MethodSpec =
   | { kind: 'eldritch-implicit'; tier?: 'lesser' | 'greater' | 'grand' | 'exceptional'; implicitTier?: number }
   | { kind: 'eldritch-exalt'; dominant: 'exarch' | 'eater' }
   | { kind: 'eldritch-annul'; dominant: 'exarch' | 'eater' }
+  | { kind: 'add-influence'; influence: 'shaper' | 'elder' | 'crusader' | 'redeemer' | 'hunter' | 'warlord' }
+  | { kind: 'orb-of-dominance' }
 
 export interface CraftSpec {
   baseName: string
@@ -159,7 +161,8 @@ function resolveMethod(
   if (
     m.kind === 'alt-regal' || m.kind === 'chaos-spam' || m.kind === 'bench' || m.kind === 'multimod' ||
     m.kind === 'slam' || m.kind === 'harvest' ||
-    m.kind === 'eldritch-implicit' || m.kind === 'eldritch-exalt' || m.kind === 'eldritch-annul'
+    m.kind === 'eldritch-implicit' || m.kind === 'eldritch-exalt' || m.kind === 'eldritch-annul' ||
+    m.kind === 'add-influence' || m.kind === 'orb-of-dominance'
   ) {
     return { method: m, desired: spec.desired }
   }

@@ -31,6 +31,8 @@ export interface Affix {
   exclusive?: boolean
   /** Fallback NNN marker (when no mod data to derive legality): non-native to the final base. */
   nonNative?: boolean
+  /** Influenced modifier (Shaper/Elder/Conqueror) — Awakener's carry + Orb of Dominance read this. */
+  influenced?: boolean
 }
 
 /** Active meta-mods that reshape what subsequent crafts can do. */

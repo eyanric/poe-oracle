@@ -29,6 +29,7 @@
     "validate:harvest": "tsx scripts/validate-harvest.mjs",
     "validate:recombine": "tsx scripts/validate-recombine.mjs",
     "validate:eldritch": "tsx scripts/validate-eldritch.mjs",
+    "validate:influence": "tsx scripts/validate-influence.mjs",
     "nnn:ladder": "tsx scripts/nnn-ladder.mjs",
     "smoke:rare": "tsx scripts/smoke-rare-pricing.mjs",
     "smoke:pob": "tsx scripts/smoke-pob.mjs",

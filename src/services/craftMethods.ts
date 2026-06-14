@@ -26,6 +26,7 @@ import { newItemState, withAffix, type ItemState } from './itemState'
 import { harvestModule } from './harvest'
 import { recombineModule } from './recombine'
 import { eldritchImplicitModule, eldritchExaltModule, eldritchAnnulModule, type EldritchSide, type EldritchTier } from './eldritch'
+import { addInfluenceModule, awakenersModule, orbOfDominanceModule, type Influence } from './influence'
 import { isLeagueActive } from './craftModule'
 import type {
   CraftModule, CraftModuleRegistry, CraftDataContext, InputSet, ModuleParams, OutcomeDistribution,
@@ -66,6 +67,12 @@ export type CraftMethod =
   /** Dominance-targeting orbs act on the dominant side's EXPLICIT pool (Exarch=prefix, Eater=suffix). */
   | { kind: 'eldritch-exalt'; dominant: EldritchSide }
   | { kind: 'eldritch-annul'; dominant: EldritchSide }
+  /** Add a named influenced mod via a Conqueror/Shaper/Elder exalt (needs a no-influence rare). */
+  | { kind: 'add-influence'; influence: Influence }
+  /** Awakener's Orb (arity-2): merge two influenced items, carrying one influenced mod from each. */
+  | { kind: 'awakeners' }
+  /** Orb of Dominance (ex-Maven's): elevate one influenced mod, remove another (collateral). */
+  | { kind: 'orb-of-dominance' }
 
 /**
  * An UNPRICED craft plan the risk engine runs once `craftCost` prices each step's
@@ -410,6 +417,9 @@ export const CRAFT_MODULES: CraftModuleRegistry = {
   'eldritch-implicit': eldritchImplicitModule,
   'eldritch-exalt': eldritchExaltModule,
   'eldritch-annul': eldritchAnnulModule,
+  'add-influence': addInfluenceModule,
+  awakeners: awakenersModule,
+  'orb-of-dominance': orbOfDominanceModule,
 }
 
 /**
