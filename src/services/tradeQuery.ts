@@ -38,7 +38,7 @@ export function findStatId(modText: string, type: string, idx: StatIndex): Trade
   return idx.get(`${type}|${normalizeMod(modText)}`) ?? null
 }
 
-function itemClassToTradeCategory(itemClass: string): string | null {
+export function itemClassToTradeCategory(itemClass: string): string | null {
   const map: Record<string, string> = {
     Amulets: 'accessory.amulet', Amulet: 'accessory.amulet',
     Rings: 'accessory.ring', Ring: 'accessory.ring',

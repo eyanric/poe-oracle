@@ -240,7 +240,20 @@ export class TradeMarketService {
     const idx = await this.ensureStatIndex()
     const built = buildTradeQuery(item, idx)
     if (!built) return { ...this.empty('item-search'), note: 'no searchable mods/base for this item' }
+    return this.searchListings(league, built, currencyToChaos, maxListings)
+  }
 
+  /**
+   * Run a PRE-BUILT trade query (search + fetch the N cheapest online listings) and
+   * summarize to a LiveQuote. Shared by `priceCheckItem` and the rare-pricing service,
+   * so every fan-out query flows through the one rate-limited path.
+   */
+  async searchListings(
+    league: string,
+    built: { query: Record<string, unknown>; sort: Record<string, string> },
+    currencyToChaos: Record<string, number>,
+    maxListings: number,
+  ): Promise<LiveQuote | null> {
     const search = await this.post<SearchResponse>(`/api/trade/search/${encodeURIComponent(league)}`, built)
     if (!search) return { ...this.empty('item-search'), note: 'search failed or rate-limited' }
     const total = search.total ?? 0
