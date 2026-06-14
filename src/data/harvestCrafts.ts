@@ -27,6 +27,10 @@ export const LIFEFORCE_ITEM: Record<LifeforceColour, string> = {
   Sacred: 'Sacred Crystallised Lifeforce',
 }
 
+/** Crystallised Rancour — Mirage-only lifeforce (drops from Corpse-Grown monsters in Harvest-in-Mirage). */
+export const RANCOUR_ITEM = 'Crystallised Rancour'
+export const MIRAGE_LEAGUE = 'Mirage'
+
 /**
  * Mod-tag → lifeforce colour (Maxroll 3.28 reforge table — authoritative):
  *   Wild  → Fire, Attack, Life
@@ -44,6 +48,8 @@ export const HARVEST_TAG_TO_MODTAG: Record<string, string> = {
   fire: 'fire', cold: 'cold', lightning: 'lightning', chaos: 'chaos',
   physical: 'physical', life: 'life', attack: 'attack', caster: 'caster',
   defence: 'defences', critical: 'critical', speed: 'speed',
+  // Crystallised Rancour (Mirage-only) reforge tags:
+  minion: 'minion', attribute: 'attribute', mana: 'mana',
 }
 
 export interface HarvestCraft {
@@ -53,9 +59,24 @@ export interface HarvestCraft {
   amount: number
   /** Sacred Lifeforce also required (the high-end forcing crafts). */
   sacred?: number
+  /** Crystallised Rancour also required (Mirage-only reforges: minion/attribute/mana). */
+  rancour?: number
+  /** Restricts the craft to a league (via league-availability gating). Omitted ⇒ core. */
+  league?: string
   /** 'confirmed' = transcribed verbatim from a current source; 'low' = representative, verify. */
   costConfidence: 'confirmed' | 'low'
 }
+
+/**
+ * Crystallised Rancour reforges (Mirage-only). Cost: N regular Lifeforce + M Rancour.
+ * Sourced from a single community guide (u4n, 2026-06-14) — UNVERIFIED vs in-game ⇒ low-confidence.
+ */
+const RANCOUR_REFORGE: Record<string, { colour: LifeforceColour; amount: number; rancour: number }> = {
+  minion: { colour: 'Primal', amount: 200, rancour: 3 },
+  attribute: { colour: 'Vivid', amount: 200, rancour: 2 },
+  mana: { colour: 'Primal', amount: 200, rancour: 2 },
+}
+export const RANCOUR_TAGS = Object.keys(RANCOUR_REFORGE)
 
 const colourOf = (tag: string): LifeforceColour => LIFEFORCE_BY_TAG[tag] ?? 'Wild'
 
@@ -80,6 +101,12 @@ export const HARVEST_TAGS = Object.keys(HARVEST_TAG_TO_MODTAG)
 export function harvestCraft(kind: HarvestCraftKind, tag: string): HarvestCraft | null {
   const t = tag.toLowerCase()
   if (!(t in HARVEST_TAG_TO_MODTAG)) return null
+  // Rancour reforges (Mirage-only): minion / attribute / mana — reforge only.
+  if (t in RANCOUR_REFORGE) {
+    if (kind !== 'reforge') return null
+    const r = RANCOUR_REFORGE[t]
+    return { kind, tag: t, colour: r.colour, amount: r.amount, rancour: r.rancour, league: MIRAGE_LEAGUE, costConfidence: 'low' }
+  }
   const colour = colourOf(t)
   if (kind === 'reforge') {
     const r = REFORGE_AMOUNT[t] ?? { amount: 75, confidence: 'low' as const }
@@ -96,4 +123,6 @@ export const HARVEST_PROVENANCE =
   'Curated 2026-06-14 from Maxroll 3.28 Harvest guide + poe.ninja lifeforce categories. ' +
   'Colour→tag mapping confirmed; reforge fire/cold/lightning(50)/chaos(100) + augment ' +
   'Fire/Phys/Attack(15000)/Life/Defence/Caster/Critical(17500)/Speed(20000)+1 Sacred confirmed; ' +
-  'other amounts representative (costConfidence:"low"). No "reforge keeping prefixes/suffixes" (removed).'
+  'other amounts representative (costConfidence:"low"). No "reforge keeping prefixes/suffixes" (removed). ' +
+  'Crystallised Rancour (Mirage-only) reforges minion(200 Primal+3)/attribute(200 Vivid+2)/mana(200 Primal+2) ' +
+  'from a single community source (u4n) — UNVERIFIED vs in-game, low-confidence.'

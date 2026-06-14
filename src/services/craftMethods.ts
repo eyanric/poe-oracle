@@ -24,6 +24,7 @@ import {
 import { findBenchCraft, type BenchData, type BenchCraft } from './benchCrafting'
 import { newItemState, withAffix, type ItemState } from './itemState'
 import { harvestModule } from './harvest'
+import { isLeagueActive } from './craftModule'
 import type {
   CraftModule, CraftModuleRegistry, CraftDataContext, InputSet, ModuleParams, OutcomeDistribution,
 } from './craftModule'
@@ -62,10 +63,16 @@ export type CraftMethod =
  * consumable. Steps mirror `craftRisk` step kinds; a fixed step may carry a direct
  * chaos value (e.g. the value of the base being slammed) instead of a consumable.
  */
+/** Additional consumables folded into the SAME step's per-use cost (multi-currency crafts). */
+export interface ExtraConsumable {
+  name: string
+  category?: string
+  qty: number
+}
 export type PlanStepBlueprint =
-  | { kind: 'keep-trying'; label: string; p: number; consumable: { name: string; category?: string }; qty?: number }
-  | { kind: 'fixed'; label: string; consumable?: { name: string; category?: string }; qty?: number; chaos?: number }
-  | { kind: 'slam'; label: string; pSuccess: number; consumable: { name: string; category?: string }; recoverable: boolean; qty?: number }
+  | { kind: 'keep-trying'; label: string; p: number; consumable: { name: string; category?: string }; qty?: number; extra?: ExtraConsumable[] }
+  | { kind: 'fixed'; label: string; consumable?: { name: string; category?: string }; qty?: number; chaos?: number; extra?: ExtraConsumable[] }
+  | { kind: 'slam'; label: string; pSuccess: number; consumable: { name: string; category?: string }; recoverable: boolean; qty?: number; extra?: ExtraConsumable[] }
 export interface PlanBlueprint {
   label: string
   steps: PlanStepBlueprint[]
@@ -390,6 +397,10 @@ export const CRAFT_MODULES: CraftModuleRegistry = {
 export function evaluateMethod(state: ItemState, data: CraftDataContext, params: ModuleParams): ExpectedAttemptsResult {
   const mod = CRAFT_MODULES[params.method.kind]
   if (!mod) return unsupported(params.method.kind, `no module registered for method "${params.method.kind}"`)
+  // Module-level league gate (per-craft gating, e.g. Harvest Rancour, is inside the module).
+  if (!isLeagueActive(mod.leagues, data.currentLeague)) {
+    return unsupported(mod.title, `${mod.title} is league-specific (${mod.leagues!.join('/')}), not active in "${data.currentLeague}"`)
+  }
   return mod.evaluate([state], data, params)
 }
 

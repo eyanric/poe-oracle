@@ -13,9 +13,9 @@
 import { buildSlotPool, totalWeight, type ModEntry } from './craftingModel'
 import { openSlots, groupsPresent, withAffix, type ItemState } from './itemState'
 import {
-  harvestCraft, LIFEFORCE_ITEM, HARVEST_TAG_TO_MODTAG, HARVEST_PROVENANCE, type HarvestCraft,
+  harvestCraft, LIFEFORCE_ITEM, RANCOUR_ITEM, HARVEST_TAG_TO_MODTAG, HARVEST_PROVENANCE, type HarvestCraft,
 } from '../data/harvestCrafts'
-import type { CraftModule, InputSet, CraftDataContext, ModuleParams, OutcomeDistribution, Applicability } from './craftModule'
+import { isLeagueActive, type CraftModule, type InputSet, type CraftDataContext, type ModuleParams, type OutcomeDistribution, type Applicability } from './craftModule'
 import type { ExpectedAttemptsResult, PlanStepBlueprint, DesiredMod, CraftMethod } from './craftMethods'
 import type { RepoeMod } from '../data/repoe'
 
@@ -42,12 +42,17 @@ const nonLockMeta = (state: ItemState) => ({ blockAttack: state.meta.noAttack, b
 function evaluateHarvest(state: ItemState, data: CraftDataContext, params: ModuleParams): ExpectedAttemptsResult {
   const m = params.method as HarvestMethod
   const def: HarvestCraft | null = harvestCraft(m.craft, m.tag)
-  if (!def) return fail(`"${m.tag}" is not a Harvest-craftable tag`)
+  if (!def) return fail(`"${m.tag}" is not a Harvest-craftable tag for ${m.craft}`)
+  // League gate (per-craft): Crystallised Rancour reforges are Mirage-only.
+  if (def.league && !isLeagueActive([def.league], data.currentLeague)) {
+    return fail(`Harvest ${def.tag} reforge is league-specific (${def.league}, uses Crystallised Rancour) — not active in "${data.currentLeague}"`)
+  }
   const modTag = HARVEST_TAG_TO_MODTAG[def.tag]
   const lifeforce = LIFEFORCE_ITEM[def.colour]
   const desired = params.desired[0]
   const baseTags = new Set(state.tags)
-  const notes: string[] = [`Harvest ${def.kind} ${def.tag} — ${def.colour} Lifeforce ×${def.amount}${def.sacred ? ` + ${def.sacred} Sacred` : ''}.`]
+  const extra = def.rancour ? [{ name: RANCOUR_ITEM, category: 'currency', qty: def.rancour }] : undefined
+  const notes: string[] = [`Harvest ${def.kind} ${def.tag} — ${def.colour} Lifeforce ×${def.amount}${def.rancour ? ` + ${def.rancour} Crystallised Rancour (Mirage)` : ''}${def.sacred ? ` + ${def.sacred} Sacred` : ''}.`]
   if (def.costConfidence === 'low') notes.push('⚠ this craft\'s lifeforce amount is unconfirmed (low-confidence).')
 
   const locks = !!(state.meta.lockPrefixes || state.meta.lockSuffixes)
@@ -78,7 +83,7 @@ function evaluateHarvest(state: ItemState, data: CraftDataContext, params: Modul
     return {
       method: `harvest reforge ${def.tag}`, supported: true, expectedAttempts: 1 / share, perAttemptProb: share,
       consumables: [], lowConfidence: true,
-      blueprint: { label: 'harvest', steps: [{ kind: 'keep-trying', label: `Harvest reforge ${def.tag}`, p: share, consumable: { name: lifeforce, category: 'currency' }, qty: def.amount }] },
+      blueprint: { label: 'harvest', steps: [{ kind: 'keep-trying', label: `Harvest reforge ${def.tag}`, p: share, consumable: { name: lifeforce, category: 'currency' }, qty: def.amount, extra }] },
       notes,
     }
   }
@@ -96,17 +101,14 @@ function evaluateHarvest(state: ItemState, data: CraftDataContext, params: Modul
       ? `Pool blocked down to ${desired.label} → DETERMINISTIC augment (P=100%).`
       : `Open ${def.tag} pool → P(${desired.label}) = ${(share * 100).toFixed(1)}% per augment (block more groups to force it).`,
   )
+  // Sacred + Rancour are consumed per augment use → folded into the same step's cost via `extra`.
+  const augExtra = [...(def.sacred ? [{ name: LIFEFORCE_ITEM.Sacred, category: 'currency', qty: def.sacred }] : []), ...(extra ?? [])]
   const lf: PlanStepBlueprint = deterministic
-    ? { kind: 'fixed', label: `Harvest augment ${def.tag}`, consumable: { name: lifeforce, category: 'currency' }, qty: def.amount }
-    : { kind: 'keep-trying', label: `Harvest augment ${def.tag}`, p: share, consumable: { name: lifeforce, category: 'currency' }, qty: def.amount }
-  const steps: PlanStepBlueprint[] = [lf]
-  if (def.sacred) {
-    steps.push({ kind: 'fixed', label: 'Sacred Lifeforce', consumable: { name: LIFEFORCE_ITEM.Sacred, category: 'currency' }, qty: def.sacred })
-    if (!deterministic) notes.push('Note: 1 Sacred is consumed per augment attempt; only the successful one is costed here (multi-attempt Sacred slightly understated).')
-  }
+    ? { kind: 'fixed', label: `Harvest augment ${def.tag}`, consumable: { name: lifeforce, category: 'currency' }, qty: def.amount, extra: augExtra }
+    : { kind: 'keep-trying', label: `Harvest augment ${def.tag}`, p: share, consumable: { name: lifeforce, category: 'currency' }, qty: def.amount, extra: augExtra }
   return {
     method: `harvest augment ${def.tag}`, supported: true, expectedAttempts: 1 / share, perAttemptProb: share,
-    consumables: [], lowConfidence: true, blueprint: { label: 'harvest', steps }, notes,
+    consumables: [], lowConfidence: true, blueprint: { label: 'harvest', steps: [lf] }, notes,
   }
 }
 

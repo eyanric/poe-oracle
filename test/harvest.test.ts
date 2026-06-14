@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { RepoeMod } from '../src/data/repoe'
 import { harvestModule } from '../src/services/harvest'
 import { newItemState, withBlockedGroup, withMeta, type ItemState } from '../src/services/itemState'
-import type { CraftDataContext, InputSet, ModuleParams } from '../src/services/craftModule'
+import { isLeagueActive, type CraftDataContext, type InputSet, type ModuleParams } from '../src/services/craftModule'
 import { harvestCraft, LIFEFORCE_BY_TAG } from '../src/data/harvestCrafts'
 
 const mod = (group: string, tags: string[], weight = 1000): RepoeMod => ({
@@ -14,8 +14,13 @@ const MODS: Record<string, RepoeMod> = {
   IncreasedLife: mod('IncreasedLife', ['life']),
   LifeRegeneration: mod('LifeRegeneration', ['life']),
   EnergyShield: mod('EnergyShield', ['defences'], 500),
+  MinionDamage: mod('MinionDamage', ['minion']),
 }
 const data: CraftDataContext = { mods: MODS }
+const dataMirage: CraftDataContext = { mods: MODS, currentLeague: 'Mirage' }
+const dataStandard: CraftDataContext = { mods: MODS, currentLeague: 'Standard' }
+const minionTarget = { slot: 'prefix' as const, group: 'MinionDamage', label: 'Minion Damage' }
+const rancourParams: ModuleParams = { desired: [minionTarget], method: { kind: 'harvest', craft: 'reforge', tag: 'minion' } }
 const rare = (over: Partial<Parameters<typeof newItemState>[0]> = {}): ItemState =>
   newItemState({ base: 'Vaal Regalia', itemClass: 'Body Armour', ilvl: 84, tags: ['body_armour', 'default'], ...over })
 const lifeTarget = { slot: 'prefix' as const, group: 'IncreasedLife', label: 'Increased Life' }
@@ -70,6 +75,33 @@ describe('Harvest module on the interface', () => {
     expect(r.supported).toBe(true)
     expect(r.expectedAttempts).toBe(1)
     expect(r.blueprint!.steps[0].kind).toBe('fixed')
+  })
+
+  it('Crystallised Rancour reforge (Mirage) is league-gated + folds Rancour into the step cost', () => {
+    expect(harvestCraft('reforge', 'minion')).toMatchObject({ league: 'Mirage', colour: 'Primal', amount: 200, rancour: 3, costConfidence: 'low' })
+
+    const mirage = harvestModule.evaluate([rare()] as InputSet, dataMirage, rancourParams)
+    expect(mirage.supported).toBe(true)
+    const step = mirage.blueprint!.steps[0]
+    expect(step.kind).toBe('keep-trying')
+    expect(step.extra?.[0]).toMatchObject({ name: 'Crystallised Rancour', qty: 3 })
+
+    // Same craft, non-Mirage league → excluded with a clear league flag (not a crash).
+    const std = harvestModule.evaluate([rare()] as InputSet, dataStandard, rancourParams)
+    expect(std.supported).toBe(false)
+    expect(std.reason).toMatch(/league-specific|Mirage/)
+  })
+
+  it('league-gating leaves CORE Harvest crafts unaffected', () => {
+    // life reforge is core (no league) → supported regardless of current league
+    expect(harvestModule.evaluate([rare()] as InputSet, dataStandard, params('reforge')).supported).toBe(true)
+  })
+
+  it('isLeagueActive: core always active; Mirage-only gated by current league', () => {
+    expect(isLeagueActive(undefined, 'Standard')).toBe(true) // core
+    expect(isLeagueActive(['Mirage'], 'Mirage')).toBe(true)
+    expect(isLeagueActive(['Mirage'], 'Standard')).toBe(false)
+    expect(isLeagueActive(['Mirage'], undefined)).toBe(true) // unknown league ⇒ don't gate
   })
 
   it('IGNORES meta-locks: a reforge on a locked item is supported and flagged DANGEROUS (not safe)', () => {

@@ -208,7 +208,7 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
 
   // Compose through the method-module interface: build the item state, evaluate the module.
   const state = newItemState({ base: base.name, itemClass: base.item_class, ilvl: spec.ilvl, tags: base.tags, meta: spec.meta ?? {}, blockedGroups: spec.blockedGroups })
-  const ev = evaluateMethod(state, { mods: deps.mods, bench: deps.bench }, { desired, method })
+  const ev = evaluateMethod(state, { mods: deps.mods, bench: deps.bench, currentLeague: deps.league }, { desired, method })
   notes.push(...ev.notes)
 
   if (!ev.supported) {
@@ -296,12 +296,20 @@ function priceBlueprint(bp: PlanBlueprint, snapshot: EconomySnapshot): { consuma
       low = p.low
       displayName = `${s.label} (${cons.name})`
     }
-    const total = unit != null ? unit * qty : null
-    consumables.push({ name: displayName, qty, chaosEach: unit, chaosTotal: total, lowConfidence: low })
-    if (unit == null) continue
-    if (s.kind === 'keep-trying') steps.push({ kind: 'keep-trying', label: s.label, p: s.p, costPerAttempt: unit * qty })
-    else if (s.kind === 'slam') steps.push({ kind: 'slam', label: s.label, pSuccess: s.pSuccess, cost: unit * qty, recoverable: s.recoverable })
-    else steps.push({ kind: 'fixed', label: s.label, cost: total ?? unit })
+    let stepCost = unit != null ? unit * qty : null
+    consumables.push({ name: displayName, qty, chaosEach: unit, chaosTotal: unit != null ? unit * qty : null, lowConfidence: low })
+    // Extra consumables folded into the SAME per-use cost (e.g. Rancour + lifeforce, augment + Sacred).
+    for (const ex of s.extra ?? []) {
+      const ep = priceConsumable(snapshot, ex.name, ex.category)
+      const eTotal = ep.chaos != null ? ep.chaos * ex.qty : null
+      consumables.push({ name: `${s.label} (${ex.name})`, qty: ex.qty, chaosEach: ep.chaos, chaosTotal: eTotal, lowConfidence: ep.low })
+      if (eTotal != null && stepCost != null) stepCost += eTotal
+      else if (eTotal == null) stepCost = null // an unpriced extra makes the step incomplete
+    }
+    if (stepCost == null) continue
+    if (s.kind === 'keep-trying') steps.push({ kind: 'keep-trying', label: s.label, p: s.p, costPerAttempt: stepCost })
+    else if (s.kind === 'slam') steps.push({ kind: 'slam', label: s.label, pSuccess: s.pSuccess, cost: stepCost, recoverable: s.recoverable })
+    else steps.push({ kind: 'fixed', label: s.label, cost: stepCost })
   }
   return { consumables, plan: { label: bp.label, steps } }
 }

@@ -56,6 +56,28 @@ console.log(`  open P=${(open.perAttemptProb * 100).toFixed(1)}% (${coldGroups.l
 ok('augment reads item-state + is deterministic when the pool is one group', blocked.perAttemptProb === 1 && blocked.blueprint?.steps[0].kind === 'fixed')
 if (coldGroups.length < 2) console.log(`  NOTE: "${tag}" resolves to ONE ${slot} group on this base, so augment is already deterministic. The open→blocked CONTRAST (p<1 → p=1) is covered by the multi-group unit test (test/harvest.test.ts).`)
 
+// ── Crystallised Rancour + league gating (Mirage-only) ────────────────────────
+console.log('\n--- Crystallised Rancour (Mirage-only) + league gating ---')
+const rancour = searchEconomy(snap, 'Crystallised Rancour', undefined, 1)[0]
+console.log(rancour ? `  Crystallised Rancour: ${rancour.chaosValue}c (${rancour.category})` : '  ⚠ Crystallised Rancour not in snapshot — Rancour cost will be unpriced/flagged')
+// find a real Rancour-tag mod (minion/attribute/mana) on this base to reforge
+const rPool = [...buildSlotPool(mods, new Set(vr.tags), 84, 'prefix', {}), ...buildSlotPool(mods, new Set(vr.tags), 84, 'suffix', {})]
+let rTag, rEntry
+for (const t of ['attribute', 'mana', 'minion']) {
+  rEntry = rPool.find(e => (e.mod.implicit_tags ?? []).includes(t))
+  if (rEntry) { rTag = t; break }
+}
+const rTarget = { slot: rEntry.slot, group: rEntry.group, label: rEntry.group }
+const rp = { desired: [rTarget], method: { kind: 'harvest', craft: 'reforge', tag: rTag } }
+console.log(`  Rancour reforge target: ${rTag} → ${rEntry.group} (${rEntry.slot})`)
+const inMirage = harvestModule.evaluate([state], { mods, currentLeague: 'Mirage' }, rp)
+const inStandard = harvestModule.evaluate([state], { mods, currentLeague: 'Standard' }, rp)
+ok('Rancour reforge ACTIVE + costs Rancour in Mirage', inMirage.supported && inMirage.blueprint?.steps[0].extra?.some(x => x.name === 'Crystallised Rancour'),
+  inMirage.supported ? `+${inMirage.blueprint.steps[0].extra.find(x => x.name === 'Crystallised Rancour').qty} Rancour` : inMirage.reason)
+ok('Rancour reforge EXCLUDED (league-flagged) in non-Mirage', inStandard.supported === false && /league-specific|Mirage/.test(inStandard.reason || ''), inStandard.reason)
+const coreInStandard = harvestModule.evaluate([state], { mods, currentLeague: 'Standard' }, params('reforge').p)
+ok('core Harvest unaffected by league (life reforge active in Standard)', coreInStandard.supported)
+
 // ── ignores meta-locks ────────────────────────────────────────────────────────
 console.log('\n--- ignores meta-locks ---')
 const lockedReforge = harvestModule.evaluate([withMeta(state, { lockSuffixes: true })], data, params('reforge').p)

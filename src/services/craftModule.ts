@@ -24,6 +24,8 @@ import type { PlanStepBlueprint, ExpectedAttemptsResult, DesiredMod, CraftMethod
 export interface CraftDataContext {
   mods: Record<string, RepoeMod>
   bench?: BenchData
+  /** Current challenge league — lets a module gate league-specific crafts (e.g. Rancour). */
+  currentLeague?: string
 }
 
 /** Arity 1 (single-item transform) or arity 2 (combine, e.g. recombinator). */
@@ -92,6 +94,12 @@ export interface CraftModule {
    * Omitted ⇒ true.
    */
   respectsLocks?: boolean
+  /**
+   * Leagues this whole method is active in (e.g. a future Mirage-mechanic module).
+   * Omitted ⇒ core / all leagues. Per-CRAFT gating (e.g. Rancour within Harvest) is done
+   * inside the module using `ctx.currentLeague`. See `isLeagueActive`.
+   */
+  leagues?: string[]
   /** Can it act on these inputs/params? (which slots/targets). */
   applicable(inputs: InputSet, ctx: CraftDataContext, params: ModuleParams): Applicability
   /** Resulting item-state DISTRIBUTION of one use (the solver iterates this). */
@@ -107,3 +115,15 @@ export interface CraftModule {
 }
 
 export type CraftModuleRegistry = Record<string, CraftModule>
+
+/**
+ * Is a craft active in the current league? `leagues` omitted/empty ⇒ core (always active).
+ * `current` unknown ⇒ treated as active (can't gate without a resolved league). The matched
+ * league is case-insensitive substring (so "Mirage" matches the live "Mirage" challenge league).
+ */
+export function isLeagueActive(leagues: string[] | undefined, current: string | undefined): boolean {
+  if (!leagues || leagues.length === 0) return true
+  if (!current) return true
+  const c = current.toLowerCase()
+  return leagues.some(l => c.includes(l.toLowerCase()))
+}
