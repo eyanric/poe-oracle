@@ -16,6 +16,7 @@ import { pSlotSurviveNNN, analyzeRecombine, RECOMBINATOR_COUNT_DIST } from '../s
 import { newItemState } from '../src/services/itemState.js'
 import { evaluateLadder } from '../src/services/ladderCost.js'
 import { estimateCraftCostLive } from '../src/services/craftCost.js'
+import { resolveBaseModIndex } from '../src/services/modWeightIndex.js'
 import { resolveCurrentLeague } from '../src/services/LeagueResolver.js'
 
 const div = (c, d) => (c == null ? '—' : `${c.toFixed(0)}c${d ? ` (${(c / d).toFixed(2)} div)` : ''}`)
@@ -74,16 +75,46 @@ const CONSERVATIVE = { ...RECOMBINATOR_COUNT_DIST, 6: [0, 0.3, 0.5, 0.2], 5: [0,
 const Pc = { rung2: rungP(rungComp.rung2, CONSERVATIVE), rung3: rungP(rungComp.rung3, CONSERVATIVE) }
 console.log(`  Stage-A SENSITIVITY (conservative table): rung2 ${(Pc.rung2 * 100).toFixed(0)}% · rung3 ${(Pc.rung3 * 100).toFixed(0)}% ← rung3 lands ~guide; Stage-A is the dominant lever`)
 
-// ── Part B: cost cascade (failure-reproduction) ────────────────────────────────
-console.log('\n--- Part B: expected cost (failure-reproduction) ---')
+// ── Part 4: REAL Spirit Shield targets (real weights → real rung-0 cost) ────────
+console.log('\n--- Part 4: real Spirit Shield mods (index-derived weights) ---')
 const league = await resolveCurrentLeague()
-// rung0 unit cost ≈ alt→regal for one mod (reuse the currency cost model); representative donor.
-const r0 = await estimateCraftCostLive({ baseName: 'Vaal Regalia', ilvl: 84, desired: [{ slot: 'prefix', group: 'IncreasedLife', label: 'Life' }], method: { kind: 'alt-regal' } }, league)
-const rung0Chaos = r0.totalChaos ?? 3
-const divine = r0.divineChaos
+const shield = Object.values(bases).find(b => b.name === 'Titanium Spirit Shield' && b.release_state === 'released')
+const idx = resolveBaseModIndex(shield, mods, 84)
+// Double-block ES Spirit Shield: BOTH block mods are PREFIXES on this base (spell-block +
+// attack-block), plus ES bulk; two real defensive suffixes round out 3p2s. Targets are named
+// GROUPS resolved against the index (not regex) — instantiate the real 3p2s from real mods.
+const want = [
+  { slot: 'prefix', group: 'SpellBlockPercentage', role: 'spell block' },
+  { slot: 'prefix', group: 'IncreasedShieldBlockPercentage', role: 'attack block' },
+  { slot: 'prefix', group: 'BaseLocalDefences', role: '+max ES' },
+  { slot: 'suffix', group: 'AllResistances', role: '+all elem res' },
+  { slot: 'suffix', group: 'ColdResistance', role: '+cold res' },
+]
+const topTier = (slot, group) => (slot === 'prefix' ? idx.prefixes : idx.suffixes).filter(e => e.group === group).sort((a, b) => a.tier - b.tier)[0]
+// flag-don't-substitute: an unresolvable named mod throws rather than falling back to a stand-in.
+const targets = want.map(w => { const e = topTier(w.slot, w.group); if (!e) throw new Error(`mod group not resolvable on ${shield.name}: ${w.group}`); return { ...e, slot: w.slot, role: w.role } })
+console.log(`  base: ${shield.name} (ilvl 84) · prefix pool Σ${idx.prefixTotal} / ${idx.prefixes.length} mods · suffix pool Σ${idx.suffixTotal} / ${idx.suffixes.length} mods`)
+console.log('  TARGET SET (⚠ confirm these are the 5 you want):')
+for (const t of targets) {
+  const pool = t.slot === 'prefix' ? idx.prefixTotal : idx.suffixTotal
+  console.log(`    [${t.slot} T${t.tier}] ${t.group} (${t.role}): w${t.weight} (${(t.weight / pool * 100).toFixed(2)}% of ${t.slot} pool) — ${(t.text || '').replace(/\n/g, ' / ')}`)
+}
+
+console.log('\n--- Part B: expected cost (failure-reproduction) ---')
+// rung0 unit = alt→regal for ONE real target on the REAL shield (real resolved weight, no flat fallback).
+const r0costs = []
+for (const t of targets) {
+  const r = await estimateCraftCostLive({ baseName: shield.name, ilvl: 84, desired: [{ slot: t.slot, modId: t.modId, group: t.group, label: t.group }], method: { kind: 'alt-regal' } }, league)
+  if (r.totalChaos != null) r0costs.push({ group: t.group, slot: t.slot, chaos: r.totalChaos, p: r.perAttemptProb })
+}
+const divine = r0costs[0] ? (await estimateCraftCostLive({ baseName: shield.name, ilvl: 84, desired: [{ slot: targets[0].slot, group: targets[0].group, label: 'x' }], method: { kind: 'alt-regal' } }, league)).divineChaos : 200
+console.log('  rung0 REAL alt→regal cost per target (real weight ⇒ real rollability):')
+for (const c of r0costs) console.log(`    ${c.group}: P/alt ${(c.p * 100).toFixed(2)}% ⇒ ${div(c.chaos, divine)}`)
+// donors are made for the RAREST desired (conservative) — use the max real cost; flag placeholder removed.
+const rung0Chaos = r0costs.length ? Math.max(...r0costs.map(c => c.chaos)) : 3
 const RECOMB_CHAOS = 20      // ⚠ recombinator currency not priced in Mirage (Settlers) — representative parameter
 const PAD_CHAOS = 60         // ⚠ rung1 NNN slam-padding (bench-block + slam) — representative parameter
-console.log(`  rung0 unit (alt→regal 1 mod, live): ${div(rung0Chaos, divine)} · recomb param ${RECOMB_CHAOS}c · pad param ${PAD_CHAOS}c (both flagged)`)
+console.log(`  rung0 unit (REAL, rarest target) ${div(rung0Chaos, divine)} [was a flat ~1c Vaal-Regalia stand-in — removed] · recomb ${RECOMB_CHAOS}c · pad ${PAD_CHAOS}c (params flagged)`)
 
 const buildLadder = (p) => [
   { label: 'rung0 single-mod donor', pSuccess: 1, baseProductionChaos: rung0Chaos },

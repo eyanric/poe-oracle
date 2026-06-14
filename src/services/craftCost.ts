@@ -204,6 +204,13 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
 
   if (!base) return unsupportedShell(`base item "${spec.baseName}" not found in RePoE`)
 
+  // Specific-named-mod contract: reject abstract targets ("any T1 prefix"). Specificity is
+  // the product — every cost rides on a named mod's REAL resolved weight, never a representative one.
+  const abstract = spec.desired.filter(d => !d.group && !d.modId)
+  if (abstract.length) {
+    return unsupportedShell('abstract target not supported — name the specific mod (group or modId), not "any prefix/tier". Specificity is the product.')
+  }
+
   const { method, desired, error } = resolveMethod(spec, base, deps)
   if (error) return unsupportedShell(error)
 

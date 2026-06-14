@@ -116,6 +116,17 @@ describe('estimateCraftCost', () => {
     expect(r.verdict.confidence).toBe('low')
   })
 
+  it('rejects an abstract target (specific named mods only)', () => {
+    const spec: CraftSpec = {
+      baseName: 'Vaal Regalia', ilvl: 84,
+      desired: [{ slot: 'prefix', label: 'any T1 prefix' }], // no group, no modId
+      method: { kind: 'alt-regal' },
+    }
+    const r = estimateCraftCost(spec, deps)
+    expect(r.supported).toBe(false)
+    expect(r.reason).toMatch(/abstract target|specific/i)
+  })
+
   it('returns an unsupported shell for an unknown base', () => {
     const spec: CraftSpec = { baseName: 'Nonexistent Base', ilvl: 84, desired: [], method: { kind: 'chaos-spam' } }
     const r = estimateCraftCost(spec, deps)
