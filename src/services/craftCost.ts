@@ -9,6 +9,11 @@
  *
  * `estimateCraftCost` is pure over loaded data + a snapshot (unit-testable). The live
  * wrapper `estimateCraftCostLive` loads RePoE + resolves the league + fetches prices.
+ *
+ * Buy side (Track A completion): for a rare craft target the live wrapper builds a
+ * comparable-listing query from the target mods and resolves a confidence-flagged
+ * RANGE via `rarePricing`; the verdict is then HEDGED — never a crisp margin when
+ * either side is low-confidence.
  */
 import type { RepoeMod, RepoeBaseItem, RepoeEssence, RepoeFossil } from '../data/repoe'
 import { getMods, getBaseItems, getEssences, getFossils, dedupeFossilsByName } from '../data/repoe'
@@ -17,7 +22,9 @@ import type { EconomySnapshot } from './economyTypes'
 import { getEconomyProvider } from './EconomyProvider'
 import { resolveCurrentLeague } from './LeagueResolver'
 import { expectedAttempts, type CraftContext, type CraftMethod, type DesiredMod } from './craftMethods'
-import type { MetaMods } from './craftingModel'
+import { buildSlotPool, type MetaMods } from './craftingModel'
+import { computePseudoTotals } from './pseudoMods'
+import { estimateRarePriceLive, type RareItemSpec } from './rarePricing'
 
 export type MethodSpec =
   | { kind: 'essence'; essenceName: string }
@@ -43,6 +50,30 @@ export interface PricedConsumable {
   lowConfidence: boolean
 }
 
+/** The resolved buy side — a confidence-flagged RANGE for rares, never a point price. */
+export interface BuySide {
+  source: 'rare-comparables' | 'named-aggregator'
+  label: string
+  lowChaos: number
+  medianChaos: number
+  confidence: 'low' | 'medium' | 'high'
+  tradeUrl?: string
+  /** Target mods not captured by pseudo-pricing (true value may be higher). */
+  unpricedMods?: string[]
+  note?: string
+}
+
+export interface HedgedVerdict {
+  decision: 'craft-likely-cheaper' | 'buy-likely-cheaper' | 'overlapping' | 'unknown'
+  craftChaos: number | null
+  buyLowChaos: number | null
+  buyMedianChaos: number | null
+  /** Crisp margin ONLY when both sides are confident AND non-overlapping; else null. */
+  marginChaos: number | null
+  confidence: 'low' | 'medium' | 'high'
+  rationale: string
+}
+
 export type CraftCostEstimate = {
   league: string
   stampDate: string
@@ -57,8 +88,8 @@ export type CraftCostEstimate = {
   totalChaos: number | null
   totalDivine: number | null
   divineChaos: number | null
-  finished: { query: string; chaos: number | null; divine: number | null; lowConfidence: boolean } | null
-  verdict: { decision: 'craft' | 'buy' | 'unknown'; marginChaos: number | null; marginDivine: number | null; rationale: string }
+  buySide: BuySide | null
+  verdict: HedgedVerdict
   lowConfidence: boolean
   notes: string[]
 }
@@ -70,6 +101,8 @@ export interface CraftDeps {
   fossils: Map<string, RepoeFossil>
   snapshot: EconomySnapshot
   league: string
+  /** Pre-resolved buy side (the live wrapper fills this; tests inject it). */
+  buySide?: BuySide | null
   /** YYYY-MM-DD stamp (injected for deterministic tests). */
   today?: string
 }
@@ -140,8 +173,8 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
   const unsupportedShell = (reason: string): CraftCostEstimate => ({
     league: deps.league, stampDate, base: spec.baseName, ilvl: spec.ilvl, method: spec.method.kind,
     supported: false, reason, expectedAttempts: Infinity, perAttemptProb: 0, consumables: [],
-    totalChaos: null, totalDivine: null, divineChaos, finished: null,
-    verdict: { decision: 'unknown', marginChaos: null, marginDivine: null, rationale: reason },
+    totalChaos: null, totalDivine: null, divineChaos, buySide: deps.buySide ?? null,
+    verdict: { decision: 'unknown', craftChaos: null, buyLowChaos: null, buyMedianChaos: null, marginChaos: null, confidence: 'low', rationale: reason },
     lowConfidence: true, notes,
   })
 
@@ -170,44 +203,19 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
   const totalDivine = totalChaos != null && divineChaos ? totalChaos / divineChaos : null
   if (anyUnpriced) notes.push(`Some consumables had no live price (${consumables.filter(c => c.chaosTotal == null).map(c => c.name).join(', ')}) — total is incomplete.`)
 
-  // ── Price the finished item (craft-vs-buy) ────────────────────────────────
-  let finished: CraftCostEstimate['finished'] = null
-  if (spec.finishedItemQuery) {
-    const m = searchEconomy(deps.snapshot, spec.finishedItemQuery, undefined, 1)[0]
-    finished = m
-      ? { query: spec.finishedItemQuery, chaos: m.chaosValue, divine: m.divineValue ?? (divineChaos ? m.chaosValue / divineChaos : null), lowConfidence: m.lowConfidence }
-      : { query: spec.finishedItemQuery, chaos: null, divine: null, lowConfidence: true }
-  }
-
-  // ── Verdict ───────────────────────────────────────────────────────────────
-  const lowConfidence = ev.lowConfidence || consumables.some(c => c.lowConfidence) || anyUnpriced || (finished?.lowConfidence ?? false)
-  let verdict: CraftCostEstimate['verdict']
-  if (finished?.chaos != null && totalChaos != null) {
-    const marginChaos = finished.chaos - totalChaos
-    const decision = marginChaos > 0 ? 'craft' : 'buy'
-    verdict = {
-      decision,
-      marginChaos,
-      marginDivine: divineChaos ? marginChaos / divineChaos : null,
-      rationale:
-        decision === 'craft'
-          ? `crafting (~${fmtChaos(totalChaos, divineChaos)}) is cheaper than buying (~${fmtChaos(finished.chaos, divineChaos)}); margin ${fmtChaos(marginChaos, divineChaos)}.`
-          : `buying (~${fmtChaos(finished.chaos, divineChaos)}) is cheaper than crafting (~${fmtChaos(totalChaos, divineChaos)}); craft loses ${fmtChaos(-marginChaos, divineChaos)}.`,
-    }
-  } else {
-    verdict = {
-      decision: 'unknown', marginChaos: null, marginDivine: null,
-      rationale: !spec.finishedItemQuery
-        ? 'no finished-item price requested — craft cost only.'
-        : 'finished item or craft total could not be priced — verdict withheld.',
-    }
-  }
-  if (lowConfidence) notes.push('LOW CONFIDENCE — prefer the divine-denominated figures; chaos micro-prices and unmodelled affix-count constants make tighter precision unreliable.')
+  // ── Hedged craft-vs-buy verdict (buy side pre-resolved by the live wrapper) ──
+  const craftLow = ev.lowConfidence || consumables.some(c => c.lowConfidence) || anyUnpriced
+  const buySide = deps.buySide ?? null
+  const verdict = hedgedVerdict(totalChaos, craftLow, buySide, divineChaos)
+  // lowConfidence reflects the CRAFT-COST side; the verdict carries its own confidence.
+  const lowConfidence = craftLow
+  if (lowConfidence) notes.push('LOW CONFIDENCE (craft cost) — prefer the divine-denominated figures; chaos micro-prices and unmodelled affix-count constants make tighter precision unreliable.')
+  if (buySide?.unpricedMods?.length) notes.push(`Buy-side could not price ${buySide.unpricedMods.length} target mod(s) (${buySide.unpricedMods.slice(0, 3).join('; ')}) — the true comparable may cost more.`)
 
   return {
     league: deps.league, stampDate, base: base.name, ilvl: spec.ilvl, method: ev.method, supported: true,
     expectedAttempts: ev.expectedAttempts, perAttemptProb: ev.perAttemptProb, consumables,
-    totalChaos, totalDivine, divineChaos, finished, verdict, lowConfidence, notes,
+    totalChaos, totalDivine, divineChaos, buySide, verdict, lowConfidence, notes,
   }
 }
 
@@ -216,12 +224,108 @@ function fmtChaos(chaos: number, divineChaos: number | null): string {
   return `${chaos.toFixed(1)}c`
 }
 
-/** Live wrapper: loads RePoE, resolves the league, fetches the economy snapshot. */
+/**
+ * Compare the (point) expected craft cost against the buy RANGE and hedge: a crisp
+ * margin is only emitted when both sides are confident AND the craft point sits clear
+ * of the range. Otherwise "overlapping / no clear edge" or a confidence-capped lean.
+ */
+export function hedgedVerdict(
+  craftChaos: number | null,
+  craftLow: boolean,
+  buy: BuySide | null,
+  divineChaos: number | null,
+): HedgedVerdict {
+  if (craftChaos == null || !buy) {
+    return {
+      decision: 'unknown', craftChaos,
+      buyLowChaos: buy?.lowChaos ?? null, buyMedianChaos: buy?.medianChaos ?? null,
+      marginChaos: null, confidence: 'low',
+      rationale: !buy ? 'no buy-side price available — craft cost only.' : 'craft total could not be priced — verdict withheld.',
+    }
+  }
+  const { lowChaos, medianChaos } = buy
+  const decision: HedgedVerdict['decision'] =
+    craftChaos <= lowChaos ? 'craft-likely-cheaper' : craftChaos >= medianChaos ? 'buy-likely-cheaper' : 'overlapping'
+  const confidence: HedgedVerdict['confidence'] =
+    craftLow || buy.confidence === 'low' ? 'low' : buy.confidence === 'high' ? 'high' : 'medium'
+  const bothConfident = !craftLow && buy.confidence === 'high'
+
+  let marginChaos: number | null = null
+  if (bothConfident && decision === 'craft-likely-cheaper') marginChaos = lowChaos - craftChaos
+  if (bothConfident && decision === 'buy-likely-cheaper') marginChaos = craftChaos - medianChaos
+
+  const f = (c: number) => fmtChaos(c, divineChaos)
+  const buyStr = `buy ${f(lowChaos)}–${f(medianChaos)} (${buy.confidence} conf, ${buy.source})`
+  const edge = marginChaos != null ? `, ~${f(marginChaos)} edge` : ' (margin not crisp — confidence capped)'
+  const rationale =
+    decision === 'craft-likely-cheaper'
+      ? `craft ~${f(craftChaos)} vs ${buyStr} — craft likely cheaper${edge}.`
+      : decision === 'buy-likely-cheaper'
+        ? `craft ~${f(craftChaos)} vs ${buyStr} — buy likely cheaper${edge}.`
+        : `craft ~${f(craftChaos)} sits inside the ${buyStr} — overlapping, no clear edge.`
+
+  return { decision, craftChaos, buyLowChaos: lowChaos, buyMedianChaos: medianChaos, marginChaos, confidence, rationale }
+}
+
+/**
+ * Turn a resolved craft target into a rare-pricing spec: pull each target mod's roll
+ * text (specific tier, or the top tier available in the group at ilvl) and pseudo-
+ * normalize. Reused by the live buy side; null when base/method can't resolve.
+ */
+export function craftTargetRareSpec(spec: CraftSpec, deps: CraftDeps): RareItemSpec | null {
+  const base = findBaseItem(deps.baseItems, spec.baseName)
+  if (!base) return null
+  const { desired, error } = resolveMethod(spec, base, deps)
+  if (error) return null
+
+  const texts: string[] = []
+  for (const d of desired) {
+    let mod = d.modId ? deps.mods[d.modId] : undefined
+    if (!mod && d.group) {
+      const pool = buildSlotPool(deps.mods, new Set(base.tags), spec.ilvl, d.slot)
+      mod = pool.filter(e => e.group === d.group).map(e => e.mod).sort((a, b) => b.required_level - a.required_level)[0]
+    }
+    if (mod?.text) texts.push(mod.text)
+  }
+  const { totals } = computePseudoTotals(texts)
+  return { baseType: base.name, itemClass: base.item_class, itemLevel: spec.ilvl, pseudoTotals: totals }
+}
+
+/**
+ * Live wrapper: loads RePoE, resolves the league + snapshot, then resolves the BUY
+ * side — a named-aggregator price when `finishedItemQuery` is given, otherwise a
+ * rare-comparables RANGE built from the target mods — and runs the hedged verdict.
+ */
 export async function estimateCraftCostLive(spec: CraftSpec, league?: string): Promise<CraftCostEstimate> {
   const resolved = league ?? (await resolveCurrentLeague())
   const [mods, baseItems, essences, fossilsRaw] = await Promise.all([getMods(), getBaseItems(), getEssences(), getFossils()])
   const snapshot = await getEconomyProvider().getEconomySnapshot(resolved)
-  return estimateCraftCost(spec, {
-    mods, baseItems, essences, fossils: dedupeFossilsByName(fossilsRaw), snapshot, league: resolved,
-  })
+  const deps: CraftDeps = { mods, baseItems, essences, fossils: dedupeFossilsByName(fossilsRaw), snapshot, league: resolved }
+
+  let buySide: BuySide | null = null
+  if (spec.finishedItemQuery) {
+    const m = searchEconomy(snapshot, spec.finishedItemQuery, undefined, 1)[0]
+    if (m && m.chaosValue > 0) {
+      buySide = {
+        source: 'named-aggregator', label: spec.finishedItemQuery,
+        lowChaos: m.chaosValue, medianChaos: m.chaosValue,
+        confidence: m.lowConfidence ? 'low' : 'high', note: 'single aggregator price (named item)',
+      }
+    }
+  } else {
+    const rareSpec = craftTargetRareSpec(spec, deps)
+    if (rareSpec && rareSpec.pseudoTotals && rareSpec.pseudoTotals.length > 0) {
+      const est = await estimateRarePriceLive(rareSpec, resolved)
+      if (est.priced && est.range) {
+        buySide = {
+          source: 'rare-comparables', label: `${rareSpec.baseType} with target mods`,
+          lowChaos: est.range.low, medianChaos: est.range.median, confidence: est.confidence,
+          tradeUrl: est.tradeUrl, unpricedMods: est.unpricedMods,
+          note: `${est.range.count} comparable listing(s)`,
+        }
+      }
+    }
+  }
+
+  return estimateCraftCost(spec, { ...deps, buySide, today: undefined })
 }

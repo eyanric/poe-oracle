@@ -63,9 +63,9 @@ const c3 = await estimateCraftCostLive(
   },
   league,
 )
-ok('finished item priced live', c3.finished?.chaos != null && c3.finished.chaos > 0, c3.finished ? money(c3)(c3.finished.chaos) : 'missing')
-ok('verdict resolves to craft/buy (not unknown)', c3.verdict.decision === 'craft' || c3.verdict.decision === 'buy', c3.verdict.decision)
-console.log(`      verdict: ${c3.verdict.decision.toUpperCase()} — ${c3.verdict.rationale}\n`)
+ok('buy side priced live (named aggregator)', c3.buySide?.lowChaos != null && c3.buySide.lowChaos > 0, c3.buySide ? money(c3)(c3.buySide.lowChaos) : 'missing')
+ok('hedged verdict resolves (not unknown)', ['craft-likely-cheaper', 'buy-likely-cheaper', 'overlapping'].includes(c3.verdict.decision), c3.verdict.decision)
+console.log(`      verdict: ${c3.verdict.decision} (${c3.verdict.confidence} conf) — ${c3.verdict.rationale}\n`)
 
 // ── Craft 4 — unsupported guardrail (compound rare reroll is NOT guessed) ──────
 console.log('--- Craft 4: unsupported guardrail (multi-mod chaos-spam) ---')

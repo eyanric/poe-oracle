@@ -34,6 +34,8 @@ export interface RepoeMod {
   implicit_tags?: string[]
   /** Tags the mod ADDS to the item once present (e.g. `has_attack_mod`). */
   adds_tags?: string[]
+  /** Human mod text with the roll range, e.g. "+(160-174) to maximum Life". */
+  text?: string
 }
 
 export interface RepoeBaseItem {

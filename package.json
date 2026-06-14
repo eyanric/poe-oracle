@@ -25,6 +25,7 @@
     "validate:repoe": "node scripts/validate-repoe.mjs",
     "validate:ev": "tsx scripts/ev-sanity.mjs",
     "validate:craft": "tsx scripts/validate-craft.mjs",
+    "smoke:rare": "tsx scripts/smoke-rare-pricing.mjs",
     "dryrun:league": "tsx scripts/dryrun-league-start-3.28.mjs",
     "check": "npm run typecheck && npm run lint && npm test"
   },

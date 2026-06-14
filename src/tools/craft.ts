@@ -126,12 +126,20 @@ function render(r: CraftCostEstimate): string {
       (r.totalDivine != null ? `  ≈ **${r.totalDivine.toFixed(2)} div**` : ''),
   )
 
-  if (r.finished) {
-    lines.push(`**Finished item ("${r.finished.query}"):** ${money(r.finished.chaos, r.divineChaos)}${r.finished.lowConfidence ? ' ⚠' : ''}`)
+  if (r.buySide) {
+    const b = r.buySide
+    lines.push(
+      `**Buy side (${b.source}):** ${money(b.lowChaos, r.divineChaos)} – ${money(b.medianChaos, r.divineChaos)} ` +
+        `· ${b.confidence} confidence${b.tradeUrl ? ` · ${b.tradeUrl}` : ''}`,
+    )
   }
   const v = r.verdict
-  const tag = v.decision === 'craft' ? '🟢 CRAFT' : v.decision === 'buy' ? '🔴 BUY' : '⚪ UNKNOWN'
-  lines.push(`**Verdict:** ${tag} — ${v.rationale}`)
+  const tag =
+    v.decision === 'craft-likely-cheaper' ? '🟢 CRAFT likely cheaper'
+      : v.decision === 'buy-likely-cheaper' ? '🔴 BUY likely cheaper'
+        : v.decision === 'overlapping' ? '🟡 OVERLAPPING — no clear edge'
+          : '⚪ UNKNOWN'
+  lines.push(`**Verdict:** ${tag} (${v.confidence} conf) — ${v.rationale}`)
 
   if (r.lowConfidence) lines.push('', `⚠ **${'LOW CONFIDENCE'}** — trust the divine figures over chaos micro-prices.`)
   if (r.notes.length) {

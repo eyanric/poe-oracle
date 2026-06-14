@@ -70,16 +70,36 @@ describe('estimateCraftCost', () => {
     expect(r.lowConfidence).toBe(true) // alt/regal are thin (listings < 5)
   })
 
-  it('produces a craft-vs-buy verdict when a finished price is supplied', () => {
+  it('hedged verdict: craft clearly below a CONFIDENT buy range → craft likely cheaper, crisp margin', () => {
     const spec: CraftSpec = {
       baseName: 'Vaal Regalia', ilvl: 84, desired: [],
       method: { kind: 'essence', essenceName: 'Deafening Essence of Greed' },
-      finishedItemQuery: 'Shroud of the Lightless',
     }
-    const r = estimateCraftCost(spec, deps)
-    expect(r.finished?.chaos).toBe(3000)
-    expect(r.verdict.decision).toBe('craft') // 3c craft << 3000c buy
-    expect(r.verdict.marginChaos).toBeCloseTo(2997, 0)
+    const r = estimateCraftCost(spec, { ...deps, buySide: { source: 'rare-comparables', label: 'x', lowChaos: 3000, medianChaos: 3500, confidence: 'high' } })
+    expect(r.verdict.decision).toBe('craft-likely-cheaper')
+    expect(r.verdict.marginChaos).toBeCloseTo(3000 - 3, 0) // craft ~3c, both confident → crisp
+    expect(r.buySide?.lowChaos).toBe(3000)
+  })
+
+  it('hedged verdict: craft inside the buy range → overlapping, no crisp margin', () => {
+    const spec: CraftSpec = {
+      baseName: 'Vaal Regalia', ilvl: 84, desired: [],
+      method: { kind: 'essence', essenceName: 'Deafening Essence of Greed' },
+    }
+    const r = estimateCraftCost(spec, { ...deps, buySide: { source: 'rare-comparables', label: 'x', lowChaos: 2, medianChaos: 10, confidence: 'high' } })
+    expect(r.verdict.decision).toBe('overlapping')
+    expect(r.verdict.marginChaos).toBeNull()
+  })
+
+  it('hedged verdict: a LOW-confidence buy side never yields a crisp margin', () => {
+    const spec: CraftSpec = {
+      baseName: 'Vaal Regalia', ilvl: 84, desired: [],
+      method: { kind: 'essence', essenceName: 'Deafening Essence of Greed' },
+    }
+    const r = estimateCraftCost(spec, { ...deps, buySide: { source: 'rare-comparables', label: 'x', lowChaos: 1, medianChaos: 2, confidence: 'low' } })
+    expect(r.verdict.decision).toBe('buy-likely-cheaper') // craft 3 > median 2
+    expect(r.verdict.marginChaos).toBeNull() // capped — buy side is low-confidence
+    expect(r.verdict.confidence).toBe('low')
   })
 
   it('returns an unsupported shell for an unknown base', () => {
