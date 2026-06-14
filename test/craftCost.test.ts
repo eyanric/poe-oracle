@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import type { RepoeMod, RepoeBaseItem, RepoeEssence, RepoeFossil } from '../src/data/repoe'
 import { estimateCraftCost, hedgedVerdict, type CraftSpec, type CraftDeps, type BuySide } from '../src/services/craftCost'
 import type { RiskProfile } from '../src/services/craftRisk'
+import type { DesiredMod } from '../src/services/craftMethods'
+import type { BenchData } from '../src/services/benchCrafting'
 import type { EconomySnapshot, CurrencyPrice, ItemPrice } from '../src/services/economyTypes'
 
 const mod = (m: Partial<RepoeMod> & Pick<RepoeMod, 'generation_type' | 'groups'>): RepoeMod => ({
@@ -33,15 +35,26 @@ const item = (name: string, chaos: number, divine: number, listings = 50): ItemP
 
 const SNAPSHOT: EconomySnapshot = {
   league: 'Mirage', fetchedAt: Date.now(), source: 'test',
-  currency: [cur('Divine Orb', 500), cur('Orb of Alteration', 0.1, 2), cur('Regal Orb', 0.2, 3), cur('Chaos Orb', 1)],
+  currency: [cur('Divine Orb', 500), cur('Orb of Alteration', 0.1, 2), cur('Regal Orb', 0.2, 3), cur('Chaos Orb', 1), cur('Exalted Orb', 5), cur('Orb of Alchemy', 0.5)],
   fragments: [], essences: [item('Deafening Essence of Greed', 3, 0.006)], divCards: [],
   uniqueWeapons: [], uniqueArmours: [item('Shroud of the Lightless', 3000, 6)], uniqueAccessories: [],
   uniqueFlasks: [], uniqueJewels: [], skillGems: [], maps: [], scarabs: [],
 }
 
+const BENCH: BenchData = {
+  crafts: [
+    { modId: 'BenchLife', slot: 'prefix', label: '+(80-89) to maximum Life', itemClasses: ['Body Armour'], costName: 'Orb of Alteration', costAmount: 2, meta: null },
+    { modId: 'BenchFireRes', slot: 'suffix', label: '+(40-45)% to Fire Resistance', itemClasses: ['Body Armour'], costName: 'Orb of Alchemy', costAmount: 2, meta: null },
+  ],
+  meta: {
+    multimod: { modId: 'MM', slot: 'suffix', label: 'Can have up to 3 Crafted Modifiers', itemClasses: ['Body Armour'], costName: 'Divine Orb', costAmount: 2, meta: 'multimod' },
+    lockSuffixes: { modId: 'LS', slot: 'prefix', label: 'Suffixes Cannot Be Changed', itemClasses: ['Body Armour'], costName: 'Divine Orb', costAmount: 2, meta: 'lockSuffixes' },
+  },
+}
+
 const deps: CraftDeps = {
   mods: MODS, baseItems: BASES, essences: ESSENCES, fossils: new Map<string, RepoeFossil>(),
-  snapshot: SNAPSHOT, league: 'Mirage', today: '2026-06-14',
+  bench: BENCH, snapshot: SNAPSHOT, league: 'Mirage', today: '2026-06-14',
 }
 
 describe('estimateCraftCost', () => {
@@ -148,6 +161,46 @@ describe('estimateCraftCost', () => {
     expect(v.decision).toBe('buy-likely-cheaper')
     expect(v.riskAdjusted).toBe(true)
     expect(v.riskNote).toMatch(/p90/)
+  })
+})
+
+describe('bench / multimod / slam methods', () => {
+  it('pure bench craft → deterministic, ~1.0 determinism, zero brick', () => {
+    const spec: CraftSpec = { baseName: 'Vaal Regalia', ilvl: 84, desired: [], method: { kind: 'bench', benchMods: ['maximum Life'] } }
+    const r = estimateCraftCost(spec, deps)
+    expect(r.supported).toBe(true)
+    expect(r.risk?.category).toBe('deterministic')
+    expect(r.risk?.determinism.score).toBe(1)
+    expect(r.risk?.bricks).toHaveLength(0)
+    expect(r.totalChaos).toBeCloseTo(2 * 0.1, 6) // 2 alts × 0.1c
+  })
+
+  it('multimod craft → deterministic; total includes the (low-confidence) meta cost', () => {
+    const spec: CraftSpec = { baseName: 'Vaal Regalia', ilvl: 84, desired: [], method: { kind: 'multimod', benchMods: ['maximum Life', 'Fire Resistance'] } }
+    const r = estimateCraftCost(spec, deps)
+    expect(r.supported).toBe(true)
+    expect(r.risk?.category).toBe('deterministic')
+    // multimod 2 div (1000c) + life 0.2c + fire-res 1c
+    expect(r.totalChaos).toBeCloseTo(1000 + 0.2 + 1, 4)
+    expect(r.lowConfidence).toBe(true) // stale bench/meta costs
+  })
+
+  it('THE CRUX: the same exalt slam flips high-brick → safe when protected', () => {
+    const target: DesiredMod = { slot: 'prefix', group: 'IncreasedLife', label: 'Increased Life' }
+    const unprotected = estimateCraftCost(
+      { baseName: 'Vaal Regalia', ilvl: 84, desired: [target], method: { kind: 'slam', baseValueChaos: 1000 } },
+      deps,
+    )
+    expect(unprotected.risk?.category).toBe('high-brick')
+    expect(unprotected.risk?.bricks[0].valueAtRisk).toBeGreaterThanOrEqual(1000)
+
+    const protectedSlam = estimateCraftCost(
+      { baseName: 'Vaal Regalia', ilvl: 84, desired: [target], method: { kind: 'slam', protect: 'suffixes', baseValueChaos: 1000 } },
+      deps,
+    )
+    expect(protectedSlam.risk?.category).not.toBe('high-brick')
+    expect(protectedSlam.risk?.bricks).toHaveLength(0) // no value-at-risk anymore
+    expect(protectedSlam.risk!.determinism.score).toBeGreaterThan(unprotected.risk!.determinism.score)
   })
 })
 

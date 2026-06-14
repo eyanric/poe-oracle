@@ -36,9 +36,12 @@ export function registerCraftCostTool(server: McpServer): void {
             }),
           )
           .describe('Target mods to land. essence auto-targets its forced mod, so it may be empty there.'),
-        method: z.enum(['essence', 'alt-regal', 'chaos-spam', 'fossil']).describe('Crafting method.'),
+        method: z.enum(['essence', 'alt-regal', 'chaos-spam', 'fossil', 'bench', 'multimod', 'slam']).describe('Crafting method.'),
         essenceName: z.string().optional().describe('Required for method=essence, e.g. "Deafening Essence of Greed".'),
         fossilNames: z.array(z.string()).optional().describe('Required for method=fossil, e.g. ["Pristine Fossil"].'),
+        benchMods: z.array(z.string()).optional().describe('Required for method=bench/multimod: bench-craft search terms, e.g. ["maximum Life", "Fire Resistance"].'),
+        protect: z.enum(['prefixes', 'suffixes']).optional().describe('method=slam: lock this affix side (cannot be changed) so a miss is recoverable, not a brick.'),
+        baseValueChaos: z.number().optional().describe('method=slam: chaos value of the base being slammed (the value-at-risk if it bricks).'),
         meta: z
           .object({
             blockAttack: z.boolean().optional(),
@@ -52,8 +55,8 @@ export function registerCraftCostTool(server: McpServer): void {
         league: z.string().optional().describe('League name. Defaults to the current challenge league.'),
       },
     },
-    async ({ baseName, ilvl, desiredMods, method, essenceName, fossilNames, meta, finishedItemQuery, league }) => {
-      const methodSpec = toMethodSpec(method, essenceName, fossilNames)
+    async ({ baseName, ilvl, desiredMods, method, essenceName, fossilNames, benchMods, protect, baseValueChaos, meta, finishedItemQuery, league }) => {
+      const methodSpec = toMethodSpec(method, { essenceName, fossilNames, benchMods, protect, baseValueChaos })
       if ('error' in methodSpec) {
         return { content: [{ type: 'text', text: `**calc_craft_cost** — input error: ${methodSpec.error}` }], isError: true }
       }
@@ -73,17 +76,25 @@ export function registerCraftCostTool(server: McpServer): void {
 
 function toMethodSpec(
   method: string,
-  essenceName?: string,
-  fossilNames?: string[],
+  o: { essenceName?: string; fossilNames?: string[]; benchMods?: string[]; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number },
 ): MethodSpec | { error: string } {
   if (method === 'essence') {
-    if (!essenceName) return { error: 'method=essence requires essenceName' }
-    return { kind: 'essence', essenceName }
+    if (!o.essenceName) return { error: 'method=essence requires essenceName' }
+    return { kind: 'essence', essenceName: o.essenceName }
   }
   if (method === 'fossil') {
-    if (!fossilNames?.length) return { error: 'method=fossil requires fossilNames' }
-    return { kind: 'fossil', fossilNames }
+    if (!o.fossilNames?.length) return { error: 'method=fossil requires fossilNames' }
+    return { kind: 'fossil', fossilNames: o.fossilNames }
   }
+  if (method === 'bench') {
+    if (!o.benchMods?.length) return { error: 'method=bench requires benchMods' }
+    return { kind: 'bench', benchMods: o.benchMods }
+  }
+  if (method === 'multimod') {
+    if (!o.benchMods?.length) return { error: 'method=multimod requires benchMods' }
+    return { kind: 'multimod', benchMods: o.benchMods }
+  }
+  if (method === 'slam') return { kind: 'slam', protect: o.protect, baseValueChaos: o.baseValueChaos }
   if (method === 'alt-regal') return { kind: 'alt-regal' }
   return { kind: 'chaos-spam' }
 }

@@ -77,12 +77,13 @@ export interface RepoeItemClass {
   influence_tags?: string[]
 }
 
-/** A Horticrafting/bench option — its `actions` carry an `add_mod` for craftable mods. */
+/** A crafting-bench option — `actions.add_explicit_mod` is the crafted mod id it applies. */
 export interface RepoeBenchOption {
   master?: string
   bench_tier?: number
   item_classes: string[]
-  actions: { add_mod?: string; [k: string]: unknown }
+  actions: { add_explicit_mod?: string; [k: string]: unknown }
+  /** Currency metadata path → amount (e.g. `Metadata/Items/Currency/CurrencyModValues`: 2). */
   cost?: Record<string, number>
 }
 

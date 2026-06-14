@@ -21,6 +21,7 @@ import {
   type ModEntry,
   type MetaMods,
 } from './craftingModel'
+import { findBenchCraft, type BenchData, type BenchCraft } from './benchCrafting'
 
 /** One mod the craft is trying to land. Matches by specific id or by group (any tier). */
 export interface DesiredMod {
@@ -35,6 +36,10 @@ export interface CraftContext {
   baseTags: Set<string>
   ilvl: number
   meta?: MetaMods
+  /** Item class (for bench-craft applicability). */
+  itemClass?: string
+  /** Loaded bench/meta data (for bench/multimod/slam methods). */
+  bench?: BenchData
 }
 
 export type CraftMethod =
@@ -42,6 +47,23 @@ export type CraftMethod =
   | { kind: 'alt-regal' }
   | { kind: 'chaos-spam' }
   | { kind: 'fossil'; fossils: RepoeFossil[]; fossilNames: string[] }
+  | { kind: 'bench'; benchMods: string[] }
+  | { kind: 'multimod'; benchMods: string[] }
+  | { kind: 'slam'; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number }
+
+/**
+ * An UNPRICED craft plan the risk engine runs once `craftCost` prices each step's
+ * consumable. Steps mirror `craftRisk` step kinds; a fixed step may carry a direct
+ * chaos value (e.g. the value of the base being slammed) instead of a consumable.
+ */
+export type PlanStepBlueprint =
+  | { kind: 'keep-trying'; label: string; p: number; consumable: { name: string; category?: string }; qty?: number }
+  | { kind: 'fixed'; label: string; consumable?: { name: string; category?: string }; qty?: number; chaos?: number }
+  | { kind: 'slam'; label: string; pSuccess: number; consumable: { name: string; category?: string }; recoverable: boolean; qty?: number }
+export interface PlanBlueprint {
+  label: string
+  steps: PlanStepBlueprint[]
+}
 
 /** Expected consumable usage across the WHOLE craft (qty already EV-multiplied). */
 export interface ConsumableUse {
@@ -60,6 +82,8 @@ export interface ExpectedAttemptsResult {
   /** P(hit) per primary attempt. */
   perAttemptProb: number
   consumables: ConsumableUse[]
+  /** When set, craftCost prices this multi-step plan (bench/multimod/slam) for the risk engine. */
+  blueprint?: PlanBlueprint
   /** True when an unmodelled game constant (magic/rare affix counts) drives the EV. */
   lowConfidence: boolean
   notes: string[]
@@ -218,6 +242,89 @@ function rareReroll(
   }
 }
 
+// ── Methods: bench / multimod / slam (deterministic + meta-protected gambles) ──
+
+const STALE_COST_NOTE =
+  '⚠ bench/meta COSTS are low-confidence — RePoE export amounts read as pre-3.28 (multimod 2 div, ' +
+  'bench in alt/chaos), not the 3.28 "standardized ~4 Exalted" rework. Structure is reliable; amounts may be stale.'
+
+function resolveBenchMods(ctx: CraftContext, terms: string[]): { found: BenchCraft[]; missing: string[] } {
+  const found: BenchCraft[] = []
+  const missing: string[] = []
+  for (const t of terms) {
+    const c = ctx.bench && ctx.itemClass ? findBenchCraft(ctx.bench, ctx.itemClass, t) : null
+    if (c) found.push(c)
+    else missing.push(t)
+  }
+  return { found, missing }
+}
+
+const benchStep = (c: BenchCraft): PlanStepBlueprint => ({
+  kind: 'fixed', label: `bench: ${c.label}`, consumable: { name: c.costName, category: 'currency' }, qty: c.costAmount,
+})
+
+function bench(ctx: CraftContext, method: Extract<CraftMethod, { kind: 'bench' }>): ExpectedAttemptsResult {
+  if (!ctx.bench || !ctx.itemClass) return unsupported('bench', 'bench data / item class unavailable')
+  const { found, missing } = resolveBenchMods(ctx, method.benchMods)
+  if (missing.length) return unsupported('bench', `no bench craft for: ${missing.join(', ')} on ${ctx.itemClass}`)
+  return {
+    method: 'bench craft', supported: true, expectedAttempts: 1, perAttemptProb: 1, consumables: [],
+    blueprint: { label: 'bench', steps: found.map(benchStep) },
+    lowConfidence: true,
+    notes: [`Deterministic: ${found.length} guaranteed bench mod(s).`, STALE_COST_NOTE],
+  }
+}
+
+function multimod(ctx: CraftContext, method: Extract<CraftMethod, { kind: 'multimod' }>): ExpectedAttemptsResult {
+  if (!ctx.bench || !ctx.itemClass) return unsupported('multimod', 'bench data / item class unavailable')
+  const mm = ctx.bench.meta.multimod
+  if (!mm) return unsupported('multimod', 'multimod meta-mod not found in bench data')
+  if (method.benchMods.length < 2) return unsupported('multimod', 'multimod is only worth it for ≥2 crafted mods')
+  const { found, missing } = resolveBenchMods(ctx, method.benchMods)
+  if (missing.length) return unsupported('multimod', `no bench craft for: ${missing.join(', ')} on ${ctx.itemClass}`)
+  const steps: PlanStepBlueprint[] = [
+    { kind: 'fixed', label: 'meta: Can have multiple Crafted Modifiers', consumable: { name: mm.costName, category: 'currency' }, qty: mm.costAmount },
+    ...found.map(benchStep),
+  ]
+  return {
+    method: 'multimod', supported: true, expectedAttempts: 1, perAttemptProb: 1, consumables: [],
+    blueprint: { label: 'multimod', steps },
+    lowConfidence: true,
+    notes: [`Deterministic: multimod + ${found.length} bench mods, all guaranteed.`, STALE_COST_NOTE],
+  }
+}
+
+function slam(ctx: CraftContext, desired: DesiredMod[], method: Extract<CraftMethod, { kind: 'slam' }>): ExpectedAttemptsResult {
+  if (desired.length === 0) return unsupported('slam', 'no target mod for the open slot')
+  const d = desired[0]
+  const pool = buildSlotPool(ctx.mods, ctx.baseTags, ctx.ilvl, d.slot, { meta: ctx.meta })
+  const pSuccess = slotShare(pool, matcher(d))
+  if (pSuccess <= 0) return unsupported('slam', `${d.label} cannot roll in the open ${d.slot} slot (weight 0)`)
+
+  const recoverable = !!method.protect
+  const steps: PlanStepBlueprint[] = []
+  if ((method.baseValueChaos ?? 0) > 0) steps.push({ kind: 'fixed', label: 'built base (value at risk)', chaos: method.baseValueChaos })
+  if (method.protect) {
+    const metaCraft = method.protect === 'prefixes' ? ctx.bench?.meta.lockPrefixes : ctx.bench?.meta.lockSuffixes
+    if (!metaCraft) return unsupported('slam', `protective meta "${method.protect} cannot be changed" not found in bench data`)
+    steps.push({ kind: 'fixed', label: `meta: ${method.protect} cannot be changed`, consumable: { name: metaCraft.costName, category: 'currency' }, qty: metaCraft.costAmount })
+  }
+  steps.push({ kind: 'slam', label: `Exalt slam → ${d.label}`, pSuccess, consumable: { name: 'Exalted Orb', category: 'currency' }, recoverable })
+
+  const notes = [
+    `Exalt slam P(${d.label}) = ${(pSuccess * 100).toFixed(1)}% (share of open ${d.slot} slot).`,
+    recoverable
+      ? `PROTECTED (${method.protect} locked) → a miss is recoverable (re-slam), NOT a brick.`
+      : `UNPROTECTED → a miss BRICKS: the built base (${(method.baseValueChaos ?? 0).toFixed(0)}c) is lost.`,
+    STALE_COST_NOTE,
+  ]
+  return {
+    method: `exalt slam${method.protect ? ` (protected: ${method.protect})` : ' (unprotected)'}`,
+    supported: true, expectedAttempts: pSuccess > 0 ? 1 / pSuccess : Infinity, perAttemptProb: pSuccess,
+    consumables: [], blueprint: { label: 'slam', steps }, lowConfidence: true, notes,
+  }
+}
+
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 
 export function expectedAttempts(ctx: CraftContext, desired: DesiredMod[], method: CraftMethod): ExpectedAttemptsResult {
@@ -236,5 +343,11 @@ export function expectedAttempts(ctx: CraftContext, desired: DesiredMod[], metho
         { name: method.fossilNames[0], qty: 1, category: 'currency' },
         method.fossils,
       )
+    case 'bench':
+      return bench(ctx, method)
+    case 'multimod':
+      return multimod(ctx, method)
+    case 'slam':
+      return slam(ctx, desired, method)
   }
 }

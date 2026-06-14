@@ -21,17 +21,22 @@ import { searchEconomy } from './economySearch'
 import type { EconomySnapshot } from './economyTypes'
 import { getEconomyProvider } from './EconomyProvider'
 import { resolveCurrentLeague } from './LeagueResolver'
-import { expectedAttempts, type CraftContext, type CraftMethod, type DesiredMod } from './craftMethods'
+import { expectedAttempts, type CraftContext, type CraftMethod, type DesiredMod, type PlanBlueprint } from './craftMethods'
 import { buildSlotPool, type MetaMods } from './craftingModel'
 import { computePseudoTotals } from './pseudoMods'
 import { estimateRarePriceLive, type RareItemSpec } from './rarePricing'
 import { riskProfile, type RiskProfile, type RiskCategory, type CraftPlan, type CraftStep } from './craftRisk'
+import { normalizeBench, type BenchData } from './benchCrafting'
+import { getBenchOptions } from '../data/repoe'
 
 export type MethodSpec =
   | { kind: 'essence'; essenceName: string }
   | { kind: 'alt-regal' }
   | { kind: 'chaos-spam' }
   | { kind: 'fossil'; fossilNames: string[] }
+  | { kind: 'bench'; benchMods: string[] }
+  | { kind: 'multimod'; benchMods: string[] }
+  | { kind: 'slam'; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number }
 
 export interface CraftSpec {
   baseName: string
@@ -111,6 +116,8 @@ export interface CraftDeps {
   fossils: Map<string, RepoeFossil>
   snapshot: EconomySnapshot
   league: string
+  /** Bench/meta data (for bench/multimod/slam methods). */
+  bench?: BenchData
   /** Pre-resolved buy side (the live wrapper fills this; tests inject it). */
   buySide?: BuySide | null
   /** YYYY-MM-DD stamp (injected for deterministic tests). */
@@ -135,7 +142,9 @@ function resolveMethod(
   deps: CraftDeps,
 ): { method: CraftMethod; desired: DesiredMod[]; error?: string } {
   const m = spec.method
-  if (m.kind === 'alt-regal' || m.kind === 'chaos-spam') return { method: m, desired: spec.desired }
+  if (m.kind === 'alt-regal' || m.kind === 'chaos-spam' || m.kind === 'bench' || m.kind === 'multimod' || m.kind === 'slam') {
+    return { method: m, desired: spec.desired }
+  }
   if (m.kind === 'fossil') {
     const fossils: RepoeFossil[] = []
     for (const n of m.fossilNames) {
@@ -193,7 +202,7 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
   const { method, desired, error } = resolveMethod(spec, base, deps)
   if (error) return unsupportedShell(error)
 
-  const ctx: CraftContext = { mods: deps.mods, baseTags: new Set(base.tags), ilvl: spec.ilvl, meta: spec.meta }
+  const ctx: CraftContext = { mods: deps.mods, baseTags: new Set(base.tags), ilvl: spec.ilvl, meta: spec.meta, itemClass: base.item_class, bench: deps.bench }
   const ev = expectedAttempts(ctx, desired, method)
   notes.push(...ev.notes)
 
@@ -203,19 +212,20 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
     return shell
   }
 
-  // ── Price the consumables ─────────────────────────────────────────────────
-  const consumables: PricedConsumable[] = ev.consumables.map(c => {
-    const { chaos, low } = priceConsumable(deps.snapshot, c.name, c.category)
-    return { name: c.name, qty: c.qty, chaosEach: chaos, chaosTotal: chaos != null ? chaos * c.qty : null, lowConfidence: low }
-  })
+  // ── Price into a CraftPlan: blueprint methods (bench/multimod/slam) or the
+  //    geometric consumable model — both end at a priced plan for the risk engine. ─
+  const priced = ev.blueprint
+    ? priceBlueprint(ev.blueprint, deps.snapshot)
+    : priceConsumables(ev.consumables, deps.snapshot, ev)
+  const { consumables, plan } = priced
   const anyUnpriced = consumables.some(c => c.chaosTotal == null)
-  const totalChaos = anyUnpriced ? null : consumables.reduce((s, c) => s + (c.chaosTotal ?? 0), 0)
-  const totalDivine = totalChaos != null && divineChaos ? totalChaos / divineChaos : null
-  if (anyUnpriced) notes.push(`Some consumables had no live price (${consumables.filter(c => c.chaosTotal == null).map(c => c.name).join(', ')}) — total is incomplete.`)
+  if (anyUnpriced) notes.push(`Some steps had no live price (${consumables.filter(c => c.chaosTotal == null).map(c => c.name).join(', ')}) — total is incomplete.`)
 
   // ── Risk profile: cost distribution + determinism + bricks ────────────────
-  const risk = anyUnpriced ? null : riskProfile(buildPlan(ev, consumables), { seed: 0x5eed })
+  const risk = anyUnpriced ? null : riskProfile(plan, { seed: 0x5eed })
   if (risk) notes.push(...risk.notes)
+  const totalChaos = risk ? risk.distribution.mean : null
+  const totalDivine = totalChaos != null && divineChaos ? totalChaos / divineChaos : null
 
   // ── Hedged + risk-adjusted craft-vs-buy verdict ───────────────────────────
   const craftLow = ev.lowConfidence || consumables.some(c => c.lowConfidence) || anyUnpriced
@@ -234,12 +244,19 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
 }
 
 /**
- * Map a priced method into a risk CraftPlan: the per-attempt consumable (qty scales
- * with expected attempts, p < 1) becomes a keep-trying step; everything else is a
- * guaranteed fixed cost. Current methods have no brick steps (those arrive with the
- * future slam/annul track).
+ * Price the geometric consumable model into a CraftPlan: the per-attempt consumable
+ * (qty scales with expected attempts, p < 1) becomes a keep-trying step; everything
+ * else is a guaranteed fixed cost.
  */
-function buildPlan(ev: { expectedAttempts: number; perAttemptProb: number }, consumables: PricedConsumable[]): CraftPlan {
+function priceConsumables(
+  uses: { name: string; qty: number; category?: string }[],
+  snapshot: EconomySnapshot,
+  ev: { expectedAttempts: number; perAttemptProb: number },
+): { consumables: PricedConsumable[]; plan: CraftPlan } {
+  const consumables: PricedConsumable[] = uses.map(c => {
+    const { chaos, low } = priceConsumable(snapshot, c.name, c.category)
+    return { name: c.name, qty: c.qty, chaosEach: chaos, chaosTotal: chaos != null ? chaos * c.qty : null, lowConfidence: low }
+  })
   const steps: CraftStep[] = []
   for (const c of consumables) {
     if (c.chaosEach == null) continue
@@ -248,7 +265,40 @@ function buildPlan(ev: { expectedAttempts: number; perAttemptProb: number }, con
     if (isKeepTrying) steps.push({ kind: 'keep-trying', label: c.name, p: ev.perAttemptProb, costPerAttempt: c.chaosEach })
     else steps.push({ kind: 'fixed', label: c.name, cost: c.chaosTotal ?? c.chaosEach })
   }
-  return { label: 'craft', steps }
+  return { consumables, plan: { label: 'craft', steps } }
+}
+
+/**
+ * Price a blueprint (bench/multimod/slam) into a CraftPlan: each step's consumable is
+ * priced live (or a direct chaos value used as-is), preserving keep-trying / fixed /
+ * slam (with its recoverable flag — protection vs brick).
+ */
+function priceBlueprint(bp: PlanBlueprint, snapshot: EconomySnapshot): { consumables: PricedConsumable[]; plan: CraftPlan } {
+  const consumables: PricedConsumable[] = []
+  const steps: CraftStep[] = []
+  for (const s of bp.steps) {
+    const qty = ('qty' in s ? s.qty : undefined) ?? 1
+    let unit: number | null
+    let low = false
+    let displayName: string
+    if (s.kind === 'fixed' && s.chaos != null) {
+      unit = s.chaos
+      displayName = s.label
+    } else {
+      const cons = (s as { consumable?: { name: string; category?: string } }).consumable!
+      const p = priceConsumable(snapshot, cons.name, cons.category)
+      unit = p.chaos
+      low = p.low
+      displayName = `${s.label} (${cons.name})`
+    }
+    const total = unit != null ? unit * qty : null
+    consumables.push({ name: displayName, qty, chaosEach: unit, chaosTotal: total, lowConfidence: low })
+    if (unit == null) continue
+    if (s.kind === 'keep-trying') steps.push({ kind: 'keep-trying', label: s.label, p: s.p, costPerAttempt: unit * qty })
+    else if (s.kind === 'slam') steps.push({ kind: 'slam', label: s.label, pSuccess: s.pSuccess, cost: unit * qty, recoverable: s.recoverable })
+    else steps.push({ kind: 'fixed', label: s.label, cost: total ?? unit })
+  }
+  return { consumables, plan: { label: bp.label, steps } }
 }
 
 function fmtChaos(chaos: number, divineChaos: number | null): string {
@@ -358,9 +408,14 @@ export function craftTargetRareSpec(spec: CraftSpec, deps: CraftDeps): RareItemS
  */
 export async function estimateCraftCostLive(spec: CraftSpec, league?: string): Promise<CraftCostEstimate> {
   const resolved = league ?? (await resolveCurrentLeague())
-  const [mods, baseItems, essences, fossilsRaw] = await Promise.all([getMods(), getBaseItems(), getEssences(), getFossils()])
+  const [mods, baseItems, essences, fossilsRaw, benchOptions] = await Promise.all([
+    getMods(), getBaseItems(), getEssences(), getFossils(), getBenchOptions(),
+  ])
   const snapshot = await getEconomyProvider().getEconomySnapshot(resolved)
-  const deps: CraftDeps = { mods, baseItems, essences, fossils: dedupeFossilsByName(fossilsRaw), snapshot, league: resolved }
+  const deps: CraftDeps = {
+    mods, baseItems, essences, fossils: dedupeFossilsByName(fossilsRaw),
+    bench: normalizeBench(benchOptions, mods), snapshot, league: resolved,
+  }
 
   let buySide: BuySide | null = null
   if (spec.finishedItemQuery) {
