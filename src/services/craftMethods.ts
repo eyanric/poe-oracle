@@ -24,6 +24,7 @@ import {
 import { findBenchCraft, type BenchData, type BenchCraft } from './benchCrafting'
 import { newItemState, withAffix, type ItemState } from './itemState'
 import { harvestModule } from './harvest'
+import { recombineModule } from './recombine'
 import { isLeagueActive } from './craftModule'
 import type {
   CraftModule, CraftModuleRegistry, CraftDataContext, InputSet, ModuleParams, OutcomeDistribution,
@@ -57,16 +58,23 @@ export type CraftMethod =
   | { kind: 'multimod'; benchMods: string[] }
   | { kind: 'slam'; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number }
   | { kind: 'harvest'; craft: 'reforge' | 'augment' | 'remove'; tag: string }
+  | { kind: 'recombine' }
 
 /**
  * An UNPRICED craft plan the risk engine runs once `craftCost` prices each step's
  * consumable. Steps mirror `craftRisk` step kinds; a fixed step may carry a direct
  * chaos value (e.g. the value of the base being slammed) instead of a consumable.
  */
-/** Additional consumables folded into the SAME step's per-use cost (multi-currency crafts). */
+/**
+ * Additional cost folded into the SAME step's per-use cost (multi-currency crafts, or
+ * consumed input items). Either priced by `name` (× qty) or a direct `chaos` value
+ * (× qty) for things with no market name (e.g. the rare items a recombine consumes).
+ */
 export interface ExtraConsumable {
-  name: string
+  name?: string
   category?: string
+  chaos?: number
+  label?: string
   qty: number
 }
 export type PlanStepBlueprint =
@@ -391,17 +399,29 @@ export const CRAFT_MODULES: CraftModuleRegistry = {
   multimod: singleItemModule('multimod', 'Multimod', (ctx, _desired, m) => multimod(ctx, m as Extract<CraftMethod, { kind: 'multimod' }>)),
   slam: singleItemModule('slam', 'Exalt slam', (ctx, desired, m) => slam(ctx, desired, m as Extract<CraftMethod, { kind: 'slam' }>)),
   harvest: harvestModule,
+  recombine: recombineModule,
 }
 
-/** Evaluate a method through its module (the interface entry point for craftCost). */
-export function evaluateMethod(state: ItemState, data: CraftDataContext, params: ModuleParams): ExpectedAttemptsResult {
+/**
+ * Evaluate a method through its module over an InputSet of the right ARITY (1 or 2).
+ * The real arity-2 entry point: a two-item combine passes [a, b]. Module-level league
+ * gating happens here; per-craft gating (e.g. Harvest Rancour) is inside the module.
+ */
+export function evaluateInputs(inputs: InputSet, data: CraftDataContext, params: ModuleParams): ExpectedAttemptsResult {
   const mod = CRAFT_MODULES[params.method.kind]
   if (!mod) return unsupported(params.method.kind, `no module registered for method "${params.method.kind}"`)
-  // Module-level league gate (per-craft gating, e.g. Harvest Rancour, is inside the module).
+  if (mod.arity !== inputs.length) {
+    return unsupported(mod.title, `${mod.title} takes ${mod.arity} input item(s), got ${inputs.length}`)
+  }
   if (!isLeagueActive(mod.leagues, data.currentLeague)) {
     return unsupported(mod.title, `${mod.title} is league-specific (${mod.leagues!.join('/')}), not active in "${data.currentLeague}"`)
   }
-  return mod.evaluate([state], data, params)
+  return mod.evaluate(inputs, data, params)
+}
+
+/** Single-item (arity-1) entry — delegates to `evaluateInputs` with one input. */
+export function evaluateMethod(state: ItemState, data: CraftDataContext, params: ModuleParams): ExpectedAttemptsResult {
+  return evaluateInputs([state], data, params)
 }
 
 /**

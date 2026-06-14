@@ -6,7 +6,7 @@
  */
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { estimateCraftCostLive, type CraftSpec, type CraftCostEstimate, type MethodSpec } from '../services/craftCost'
+import { estimateCraftCostLive, estimateRecombineLive, type CraftSpec, type CraftCostEstimate, type MethodSpec, type RecombineInput, type RecombineEstimate } from '../services/craftCost'
 import type { DesiredMod } from '../services/craftMethods'
 
 const slotEnum = z.enum(['prefix', 'suffix'])
@@ -76,6 +76,72 @@ export function registerCraftCostTool(server: McpServer): void {
       return { content: [{ type: 'text', text: render(result) }], structuredContent: result }
     },
   )
+}
+
+// ── calc_recombine (arity-2 combine) ──────────────────────────────────────────
+
+const recombineAffix = z.object({
+  group: z.string().describe('Mod group, e.g. "IncreasedLife".'),
+  modId: z.string().optional(),
+  label: z.string().optional(),
+  desired: z.boolean().optional().describe('Mark mods you want to survive onto the output.'),
+  exclusive: z.boolean().optional().describe('Settlers "exclusive" modifier (≤1 survives a combine).'),
+})
+const recombineItem = z.object({
+  itemClass: z.string().describe('Item class, e.g. "Ring" / "Body Armour" (picks the recombinator type).'),
+  ilvl: z.number(),
+  baseName: z.string().optional(),
+  prefixes: z.array(recombineAffix).optional(),
+  suffixes: z.array(recombineAffix).optional(),
+  valueChaos: z.number().optional().describe('Chaos value of this input item (consumed each attempt).'),
+})
+
+export function registerRecombineTool(server: McpServer): void {
+  server.registerTool(
+    'calc_recombine',
+    {
+      title: 'Recombinator (combine two items)',
+      description:
+        'Estimate a Settlers-ruleset recombine of TWO input items: P(target prefix/suffix set survives), ' +
+        'brick probability (incl. the exclusive-mod collision), expected attempts, and cost (2 input items ' +
+        '+ recombinator currency, live-priced) with a risk profile. Mark mods `desired` to target them and ' +
+        '`exclusive` for Settlers exclusive mods. ⚠ Stage-A count distribution + the exclusive set are ' +
+        'low-confidence (not in the data export); P-of-selection compounding is exact. Read-only.',
+      inputSchema: {
+        itemA: recombineItem,
+        itemB: recombineItem,
+        league: z.string().optional().describe('League name. Defaults to the current challenge league.'),
+      },
+    },
+    async ({ itemA, itemB, league }) => {
+      const result = await estimateRecombineLive(itemA as RecombineInput, itemB as RecombineInput, league)
+      return { content: [{ type: 'text', text: renderRecombine(result) }], structuredContent: result as unknown as Record<string, unknown> }
+    },
+  )
+}
+
+function renderRecombine(r: RecombineEstimate): string {
+  const money = (c: number | null) => (c == null ? '—' : `${c.toFixed(0)}c${r.divineChaos ? ` (${(c / r.divineChaos).toFixed(2)} div)` : ''}`)
+  const lines: string[] = [
+    `**Recombine — ${r.recombinator}** · League: ${r.league} · ${r.stampDate}`,
+    `Output ilvl ${r.outputIlvl} · pools: ${r.prefixPool} prefix / ${r.suffixPool} suffix (independent, cap 3/3)`,
+    '',
+  ]
+  if (!r.supported) {
+    lines.push(`⚠ **Unsupported / brick:** ${r.reason}`)
+    if (r.exclusiveCollision) lines.push('_(exclusive-mod collision — at most one exclusive survives)_')
+    lines.push('', '_Stage-A distribution + exclusive set are low-confidence; P-selection is exact._')
+    return lines.join('\n')
+  }
+  lines.push(
+    `**P(target):** ${(r.pTarget * 100).toFixed(1)}% = prefixes ${(r.pPrefix * 100).toFixed(1)}% × suffixes ${(r.pSuffix * 100).toFixed(1)}%`,
+    `**Brick (target not achieved):** ${(r.brickProb * 100).toFixed(1)}% · expected attempts ${r.expectedAttempts.toFixed(1)}`,
+    `**Expected cost:** ${money(r.totalChaos)}${r.totalDivine != null ? ` ≈ ${r.totalDivine.toFixed(2)} div` : ''}`,
+  )
+  if (r.risk) lines.push(`**Risk:** ${r.risk.category.toUpperCase()} · p90 ${money(r.risk.distribution.p90)}`)
+  lines.push('', '⚠ LOW CONFIDENCE — Stage-A count table + exclusive set are unconfirmed (not in the data export).')
+  for (const n of r.notes) lines.push(`- ${n}`)
+  return lines.join('\n')
 }
 
 function toMethodSpec(

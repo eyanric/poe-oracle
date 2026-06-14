@@ -77,6 +77,8 @@ export interface ModuleParams {
   method: CraftMethod
   /** Off-market prices for this use (Harvest/beast/Aisling), when applicable. */
   manualPrices?: ManualPrice[]
+  /** Per-input item value in chaos (arity-2 combine: the items consumed each attempt). */
+  inputValuesChaos?: number[]
 }
 
 /**

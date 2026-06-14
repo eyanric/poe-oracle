@@ -21,8 +21,9 @@ import { searchEconomy } from './economySearch'
 import type { EconomySnapshot } from './economyTypes'
 import { getEconomyProvider } from './EconomyProvider'
 import { resolveCurrentLeague } from './LeagueResolver'
-import { evaluateMethod, type CraftMethod, type DesiredMod, type PlanBlueprint } from './craftMethods'
-import { newItemState } from './itemState'
+import { evaluateMethod, evaluateInputs, type CraftMethod, type DesiredMod, type PlanBlueprint } from './craftMethods'
+import { newItemState, type Affix, type Slot } from './itemState'
+import { analyzeRecombine, recombineIlvl } from './recombine'
 import { buildSlotPool, type MetaMods } from './craftingModel'
 import { computePseudoTotals } from './pseudoMods'
 import { estimateRarePriceLive, type RareItemSpec } from './rarePricing'
@@ -298,11 +299,13 @@ function priceBlueprint(bp: PlanBlueprint, snapshot: EconomySnapshot): { consuma
     }
     let stepCost = unit != null ? unit * qty : null
     consumables.push({ name: displayName, qty, chaosEach: unit, chaosTotal: unit != null ? unit * qty : null, lowConfidence: low })
-    // Extra consumables folded into the SAME per-use cost (e.g. Rancour + lifeforce, augment + Sacred).
+    // Extra cost folded into the SAME per-use cost: priced by name (Rancour/Sacred) OR a
+    // direct chaos value (recombine input items, which have no market name).
     for (const ex of s.extra ?? []) {
-      const ep = priceConsumable(snapshot, ex.name, ex.category)
+      const direct = ex.chaos != null
+      const ep = direct ? { chaos: ex.chaos!, low: false } : priceConsumable(snapshot, ex.name!, ex.category)
       const eTotal = ep.chaos != null ? ep.chaos * ex.qty : null
-      consumables.push({ name: `${s.label} (${ex.name})`, qty: ex.qty, chaosEach: ep.chaos, chaosTotal: eTotal, lowConfidence: ep.low })
+      consumables.push({ name: `${s.label} (${ex.label ?? ex.name})`, qty: ex.qty, chaosEach: ep.chaos, chaosTotal: eTotal, lowConfidence: ep.low })
       if (eTotal != null && stepCost != null) stepCost += eTotal
       else if (eTotal == null) stepCost = null // an unpriced extra makes the step incomplete
     }
@@ -456,4 +459,106 @@ export async function estimateCraftCostLive(spec: CraftSpec, league?: string): P
   }
 
   return estimateCraftCost(spec, { ...deps, buySide, today: undefined })
+}
+
+// ── Recombinator (arity-2 combine) ─────────────────────────────────────────────
+
+export interface RecombineAffixSpec {
+  group: string
+  modId?: string
+  label?: string
+  /** Mark the mods you want to survive onto the output. */
+  desired?: boolean
+  /** Settlers "exclusive" modifier (≤1 survives) — caller-supplied (no data flag). */
+  exclusive?: boolean
+}
+export interface RecombineInput {
+  baseName?: string
+  itemClass: string
+  ilvl: number
+  prefixes?: RecombineAffixSpec[]
+  suffixes?: RecombineAffixSpec[]
+  /** Value (chaos) of this input item — it's consumed each combine attempt. */
+  valueChaos?: number
+}
+export type RecombineEstimate = {
+  league: string
+  stampDate: string
+  supported: boolean
+  reason?: string
+  recombinator: string
+  outputIlvl: number
+  prefixPool: number
+  suffixPool: number
+  pPrefix: number
+  pSuffix: number
+  pTarget: number
+  brickProb: number
+  exclusiveCollision: boolean
+  expectedAttempts: number
+  consumables: PricedConsumable[]
+  totalChaos: number | null
+  totalDivine: number | null
+  divineChaos: number | null
+  risk: RiskProfile | null
+  lowConfidence: boolean
+  notes: string[]
+}
+
+function toState(i: RecombineInput): { state: import('./itemState').ItemState; desired: DesiredMod[] } {
+  const mk = (a: RecombineAffixSpec, slot: Slot): Affix => ({ modId: a.modId ?? a.group, group: a.group, slot, exclusive: a.exclusive, text: a.label })
+  const affixes: Affix[] = [...(i.prefixes ?? []).map(a => mk(a, 'prefix')), ...(i.suffixes ?? []).map(a => mk(a, 'suffix'))]
+  const desired: DesiredMod[] = [
+    ...(i.prefixes ?? []).filter(a => a.desired).map(a => ({ slot: 'prefix' as Slot, group: a.group, modId: a.modId, label: a.label ?? a.group })),
+    ...(i.suffixes ?? []).filter(a => a.desired).map(a => ({ slot: 'suffix' as Slot, group: a.group, modId: a.modId, label: a.label ?? a.group })),
+  ]
+  return { state: newItemState({ base: i.baseName ?? '', itemClass: i.itemClass, ilvl: i.ilvl, affixes }), desired }
+}
+
+const recombinatorCurrencyFor = (itemClass: string): string => {
+  const c = itemClass.toLowerCase()
+  if (/ring|amulet|belt/.test(c)) return 'Jewellery Recombinator'
+  if (/armour|helmet|glove|boot|shield|quiver/.test(c)) return 'Armour Recombinator'
+  return 'Weapon Recombinator'
+}
+
+export function estimateRecombine(a: RecombineInput, b: RecombineInput, deps: CraftDeps): RecombineEstimate {
+  const stampDate = deps.today ?? new Date().toISOString().slice(0, 10)
+  const divineChaos = divineChaosOf(deps.snapshot)
+  const A = toState(a), B = toState(b)
+  const desired = [...A.desired, ...B.desired].filter((d, i, arr) => arr.findIndex(x => x.slot === d.slot && (x.modId ?? x.group) === (d.modId ?? d.group)) === i)
+  const analysis = analyzeRecombine(A.state, B.state, desired)
+  const outputIlvl = recombineIlvl(a.ilvl, b.ilvl)
+  const recombinator = recombinatorCurrencyFor(a.itemClass)
+
+  const ev = evaluateInputs([A.state, B.state], { mods: deps.mods, bench: deps.bench, currentLeague: deps.league },
+    { desired, method: { kind: 'recombine' }, inputValuesChaos: [a.valueChaos ?? 0, b.valueChaos ?? 0] })
+
+  const base = {
+    league: deps.league, stampDate, recombinator, outputIlvl,
+    prefixPool: analysis.prefixPool, suffixPool: analysis.suffixPool,
+    pPrefix: analysis.pPrefix, pSuffix: analysis.pSuffix, pTarget: analysis.pTarget,
+    brickProb: analysis.pTarget > 0 ? 1 - analysis.pTarget : 1, exclusiveCollision: analysis.exclusiveCollision,
+    divineChaos, notes: ev.notes,
+  }
+  if (!ev.supported) {
+    return { ...base, supported: false, reason: ev.reason, expectedAttempts: Infinity, consumables: [], totalChaos: null, totalDivine: null, risk: null, lowConfidence: true }
+  }
+  const { consumables, plan } = priceBlueprint(ev.blueprint!, deps.snapshot)
+  const anyUnpriced = consumables.some(c => c.chaosTotal == null)
+  const risk = anyUnpriced ? null : riskProfile(plan, { seed: 0x5eed })
+  const totalChaos = risk ? risk.distribution.mean : null
+  if (anyUnpriced) base.notes.push(`Some steps unpriced (${consumables.filter(c => c.chaosTotal == null).map(c => c.name).join(', ')}) — total incomplete.`)
+  return {
+    ...base, supported: true, expectedAttempts: ev.expectedAttempts, consumables,
+    totalChaos, totalDivine: totalChaos != null && divineChaos ? totalChaos / divineChaos : null, risk, lowConfidence: true,
+  }
+}
+
+/** Live wrapper: loads mods + snapshot, resolves the league, runs the combine. */
+export async function estimateRecombineLive(a: RecombineInput, b: RecombineInput, league?: string): Promise<RecombineEstimate> {
+  const resolved = league ?? (await resolveCurrentLeague())
+  const [mods, baseItems, essences, fossilsRaw] = await Promise.all([getMods(), getBaseItems(), getEssences(), getFossils()])
+  const snapshot = await getEconomyProvider().getEconomySnapshot(resolved)
+  return estimateRecombine(a, b, { mods, baseItems, essences, fossils: dedupeFossilsByName(fossilsRaw), snapshot, league: resolved })
 }

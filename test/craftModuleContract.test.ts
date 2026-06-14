@@ -10,14 +10,18 @@ import { CRAFT_MODULES } from '../src/services/craftMethods'
 import type { CraftModule, InputSet, ResourceConditioning, OutcomeDistribution } from '../src/services/craftModule'
 import { newItemState, withAffix, consumeResource, type ItemState } from '../src/services/itemState'
 
-describe('single-item modules (arity 1)', () => {
-  it('every registered method is an arity-1 module exposing the contract', () => {
+describe('registered modules expose the contract', () => {
+  it('every module is arity 1 or 2 and exposes the contract functions', () => {
     for (const m of Object.values(CRAFT_MODULES)) {
-      expect(m.arity).toBe(1)
+      expect([1, 2]).toContain(m.arity)
       for (const fn of ['applicable', 'outcomes', 'cost', 'toRiskSteps', 'evaluate'] as const) {
         expect(typeof m[fn]).toBe('function')
       }
     }
+  })
+  it('recombine is the arity-2 (two-item combine) module', () => {
+    expect(CRAFT_MODULES.recombine.arity).toBe(2)
+    expect(Object.values(CRAFT_MODULES).filter(m => m.arity === 1).length).toBeGreaterThanOrEqual(7)
   })
 })
 

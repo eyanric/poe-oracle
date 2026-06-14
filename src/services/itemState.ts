@@ -27,6 +27,8 @@ export interface Affix {
   /** Crafted (bench) or fractured affixes behave specially under some methods. */
   crafted?: boolean
   fractured?: boolean
+  /** "Exclusive" modifier (Settlers recombinator class): at most one survives a combine. */
+  exclusive?: boolean
 }
 
 /** Active meta-mods that reshape what subsequent crafts can do. */
