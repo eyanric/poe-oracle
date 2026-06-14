@@ -1,0 +1,43 @@
+{
+  "name": "poe-copilot",
+  "version": "0.1.0",
+  "description": "PoE 1 AI copilot — read-only, ToS-clean economy & build-analysis MCP server.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "author": "Eric Yan",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eyanric/poe-copilot.git"
+  },
+  "bin": {
+    "poe-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:ui": "vitest --ui",
+    "validate:repoe": "node scripts/validate-repoe.mjs",
+    "check": "npm run typecheck && npm run lint && npm test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.13.0",
+    "@types/node": "^20.11.16",
+    "eslint": "^9.13.0",
+    "globals": "^15.11.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.10.0",
+    "vitest": "^2.1.0"
+  }
+}

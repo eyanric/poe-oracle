@@ -1,0 +1,18 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Logs
+*.log
+
+# Env / secrets (POESESSID etc. — never commit)
+.env
+.env.*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local agent state
+.claude/
