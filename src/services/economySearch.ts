@@ -130,6 +130,8 @@ export function searchEconomy(
     results.push(...itemMatches(snapshot.maps, 'Map', query))
   if (!cat || cat === 'scarab' || cat === 'scarabs')
     results.push(...itemMatches(snapshot.scarabs, 'Scarab', query))
+  if (!cat || cat === 'oil' || cat === 'oils')
+    results.push(...itemMatches(snapshot.oils, 'Oil', query))
 
   // Confident matches first, then by match quality, then by price.
   results.sort(

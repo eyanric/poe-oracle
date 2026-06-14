@@ -135,7 +135,7 @@ function emptySnapshot(league: string): EconomySnapshot {
   return {
     league, fetchedAt: 0, currency: [], fragments: [], essences: [], divCards: [],
     uniqueWeapons: [], uniqueArmours: [], uniqueAccessories: [], uniqueFlasks: [],
-    uniqueJewels: [], skillGems: [], maps: [], scarabs: [],
+    uniqueJewels: [], skillGems: [], maps: [], scarabs: [], oils: [],
   }
 }
 

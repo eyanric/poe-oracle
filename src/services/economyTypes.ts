@@ -52,6 +52,8 @@ export interface EconomySnapshot {
   skillGems: ItemPrice[]
   maps: ItemPrice[]
   scarabs: ItemPrice[]
+  /** Blight anointment oils (Clear … Golden) — anoint recipe pricing. */
+  oils: ItemPrice[]
 }
 
 /** Flat lookup: item name → chaos value. */

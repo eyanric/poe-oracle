@@ -57,6 +57,7 @@ const ITEM_SOURCES: Array<{ field: keyof EconomySnapshot; category: string; uniq
   { field: 'skillGems', category: 'gem', uniqueOnly: false },
   { field: 'maps', category: 'map', uniqueOnly: false },
   { field: 'scarabs', category: 'scarab', uniqueOnly: false },
+  { field: 'oils', category: 'oil', uniqueOnly: false },
   { field: 'uniqueWeapons', category: 'weapon', uniqueOnly: true },
   { field: 'uniqueArmours', category: 'armour', uniqueOnly: true },
   { field: 'uniqueAccessories', category: 'accessory', uniqueOnly: true },
@@ -156,6 +157,7 @@ export class PoeWatchService implements EconomyProvider {
       skillGems: [],
       maps: [],
       scarabs: [],
+      oils: [],
     }
     ITEM_SOURCES.forEach((s, i) => {
       ;(snapshot[s.field] as ItemPrice[]) = mapItems(itemRaws[i], s.uniqueOnly)

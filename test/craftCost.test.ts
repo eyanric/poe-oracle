@@ -38,7 +38,7 @@ const SNAPSHOT: EconomySnapshot = {
   currency: [cur('Divine Orb', 500), cur('Orb of Alteration', 0.1, 2), cur('Regal Orb', 0.2, 3), cur('Chaos Orb', 1), cur('Exalted Orb', 5), cur('Orb of Alchemy', 0.5)],
   fragments: [], essences: [item('Deafening Essence of Greed', 3, 0.006)], divCards: [],
   uniqueWeapons: [], uniqueArmours: [item('Shroud of the Lightless', 3000, 6)], uniqueAccessories: [],
-  uniqueFlasks: [], uniqueJewels: [], skillGems: [], maps: [], scarabs: [],
+  uniqueFlasks: [], uniqueJewels: [], skillGems: [], maps: [], scarabs: [], oils: [],
 }
 
 const BENCH: BenchData = {

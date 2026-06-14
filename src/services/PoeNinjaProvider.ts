@@ -187,6 +187,7 @@ export class PoeNinjaProvider implements EconomyProvider {
       skillGems: [],
       maps: [],
       scarabs: [],
+      oils: [],
     }
     ITEM_TYPES.forEach((t, i) => {
       ;(snapshot[t.field] as ItemPrice[]) = mapNinjaItems(itemRaws[i])

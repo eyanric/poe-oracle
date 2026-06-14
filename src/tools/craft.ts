@@ -36,7 +36,7 @@ export function registerCraftCostTool(server: McpServer): void {
             }),
           )
           .describe('Target mods to land. essence auto-targets its forced mod, so it may be empty there.'),
-        method: z.enum(['essence', 'alt-regal', 'chaos-spam', 'fossil', 'bench', 'multimod', 'slam', 'harvest', 'eldritch-implicit', 'eldritch-exalt', 'eldritch-annul', 'add-influence', 'orb-of-dominance', 'catalyst']).describe('Crafting method.'),
+        method: z.enum(['essence', 'alt-regal', 'chaos-spam', 'fossil', 'bench', 'multimod', 'slam', 'harvest', 'eldritch-implicit', 'eldritch-exalt', 'eldritch-annul', 'add-influence', 'orb-of-dominance', 'catalyst', 'anoint']).describe('Crafting method.'),
         essenceName: z.string().optional().describe('Required for method=essence, e.g. "Deafening Essence of Greed".'),
         fossilNames: z.array(z.string()).optional().describe('Required for method=fossil, e.g. ["Pristine Fossil"].'),
         benchMods: z.array(z.string()).optional().describe('Required for method=bench/multimod: bench-craft search terms, e.g. ["maximum Life", "Fire Resistance"].'),
@@ -50,6 +50,8 @@ export function registerCraftCostTool(server: McpServer): void {
         addInfluence: z.enum(['shaper', 'elder', 'crusader', 'redeemer', 'hunter', 'warlord']).optional().describe('Required for method=add-influence: the influence to add (its Conqueror/Shaper/Elder exalt).'),
         catalyst: z.enum(['abrasive', 'accelerating', 'fertile', 'imbued', 'intrinsic', 'noxious', 'prismatic', 'tempering', 'turbulent', 'sinistral', 'dextral']).optional().describe('Required for method=catalyst: the catalyst type (scales matching-tag mod magnitudes on ring/amulet/belt). Sinistral/Dextral are Mirage.'),
         quality: z.number().optional().describe('method=catalyst: target quality % (cap 20, default 20).'),
+        notable: z.string().optional().describe('method=anoint: the named notable to anoint (resolved via the seed recipe table).'),
+        oils: z.array(z.string()).optional().describe('method=anoint: explicit 3 oils (e.g. ["Golden","Golden","Golden"]) — prices any anoint when the notable is not seeded.'),
         influence: z.array(z.string()).optional().describe('Item influence(s). eldritch ⊥ influence — influenced items are rejected for eldritch methods; add-influence requires NO existing influence.'),
         corrupted: z.boolean().optional().describe('Corrupted items cannot take eldritch implicits / influence.'),
         affixes: z.array(z.object({ slot: slotEnum, group: z.string().optional(), modId: z.string().optional(), label: z.string().optional(), influenced: z.boolean().optional() })).optional().describe('Existing affixes (eldritch annul reads the dominant side; Orb of Dominance counts `influenced` affixes — needs ≥2).'),
@@ -67,8 +69,8 @@ export function registerCraftCostTool(server: McpServer): void {
         league: z.string().optional().describe('League name. Defaults to the current challenge league.'),
       },
     },
-    async ({ baseName, ilvl, desiredMods, method, essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag, eldritchTier, eldritchImplicitTier, dominant, addInfluence, catalyst, quality, influence, corrupted, affixes, blockedGroups, meta, finishedItemQuery, league }) => {
-      const methodSpec = toMethodSpec(method, { essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag, eldritchTier, eldritchImplicitTier, dominant, addInfluence, catalyst, quality })
+    async ({ baseName, ilvl, desiredMods, method, essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag, eldritchTier, eldritchImplicitTier, dominant, addInfluence, catalyst, quality, notable, oils, influence, corrupted, affixes, blockedGroups, meta, finishedItemQuery, league }) => {
+      const methodSpec = toMethodSpec(method, { essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag, eldritchTier, eldritchImplicitTier, dominant, addInfluence, catalyst, quality, notable, oils })
       if ('error' in methodSpec) {
         return { content: [{ type: 'text', text: `**calc_craft_cost** — input error: ${methodSpec.error}` }], isError: true }
       }
@@ -164,11 +166,16 @@ function toMethodSpec(
     eldritchTier?: 'lesser' | 'greater' | 'grand' | 'exceptional'; eldritchImplicitTier?: number; dominant?: 'exarch' | 'eater';
     addInfluence?: 'shaper' | 'elder' | 'crusader' | 'redeemer' | 'hunter' | 'warlord';
     catalyst?: 'abrasive' | 'accelerating' | 'fertile' | 'imbued' | 'intrinsic' | 'noxious' | 'prismatic' | 'tempering' | 'turbulent' | 'sinistral' | 'dextral'; quality?: number;
+    notable?: string; oils?: string[];
   },
 ): MethodSpec | { error: string } {
   if (method === 'catalyst') {
     if (!o.catalyst) return { error: 'method=catalyst requires catalyst (e.g. prismatic|abrasive|...)' }
     return { kind: 'catalyst', catalyst: o.catalyst, quality: o.quality }
+  }
+  if (method === 'anoint') {
+    if (!o.notable && !(o.oils && o.oils.length)) return { error: 'method=anoint requires notable or oils (3)' }
+    return { kind: 'anoint', notable: o.notable, oils: o.oils }
   }
   if (method === 'add-influence') {
     if (!o.addInfluence) return { error: 'method=add-influence requires addInfluence (shaper|elder|crusader|redeemer|hunter|warlord)' }

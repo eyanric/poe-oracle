@@ -46,6 +46,7 @@ export type MethodSpec =
   | { kind: 'add-influence'; influence: 'shaper' | 'elder' | 'crusader' | 'redeemer' | 'hunter' | 'warlord' }
   | { kind: 'orb-of-dominance' }
   | { kind: 'catalyst'; catalyst: 'abrasive' | 'accelerating' | 'fertile' | 'imbued' | 'intrinsic' | 'noxious' | 'prismatic' | 'tempering' | 'turbulent' | 'sinistral' | 'dextral'; quality?: number; catalystCount?: number }
+  | { kind: 'anoint'; notable?: string; oils?: string[] }
 
 export interface CraftSpec {
   baseName: string
@@ -163,7 +164,7 @@ function resolveMethod(
     m.kind === 'alt-regal' || m.kind === 'chaos-spam' || m.kind === 'bench' || m.kind === 'multimod' ||
     m.kind === 'slam' || m.kind === 'harvest' ||
     m.kind === 'eldritch-implicit' || m.kind === 'eldritch-exalt' || m.kind === 'eldritch-annul' ||
-    m.kind === 'add-influence' || m.kind === 'orb-of-dominance' || m.kind === 'catalyst'
+    m.kind === 'add-influence' || m.kind === 'orb-of-dominance' || m.kind === 'catalyst' || m.kind === 'anoint'
   ) {
     return { method: m, desired: spec.desired }
   }

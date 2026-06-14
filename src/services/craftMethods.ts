@@ -28,6 +28,7 @@ import { recombineModule } from './recombine'
 import { eldritchImplicitModule, eldritchExaltModule, eldritchAnnulModule, type EldritchSide, type EldritchTier } from './eldritch'
 import { addInfluenceModule, awakenersModule, orbOfDominanceModule, type Influence } from './influence'
 import { catalystModule, type Catalyst } from './catalysts'
+import { anointModule } from './anoint'
 import { isLeagueActive } from './craftModule'
 import type {
   CraftModule, CraftModuleRegistry, CraftDataContext, InputSet, ModuleParams, OutcomeDistribution,
@@ -76,6 +77,8 @@ export type CraftMethod =
   | { kind: 'orb-of-dominance' }
   /** Catalyst: add quality to ring/amulet/belt, scaling matching-tag (or slot) mod magnitudes. */
   | { kind: 'catalyst'; catalyst: Catalyst; quality?: number; catalystCount?: number }
+  /** Anoint an amulet: a named notable (seed recipe) or explicit 3 oils → deterministic enchant. */
+  | { kind: 'anoint'; notable?: string; oils?: string[] }
 
 /**
  * An UNPRICED craft plan the risk engine runs once `craftCost` prices each step's
@@ -424,6 +427,7 @@ export const CRAFT_MODULES: CraftModuleRegistry = {
   awakeners: awakenersModule,
   'orb-of-dominance': orbOfDominanceModule,
   catalyst: catalystModule,
+  anoint: anointModule,
 }
 
 /**

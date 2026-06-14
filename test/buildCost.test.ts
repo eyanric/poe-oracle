@@ -15,7 +15,7 @@ const SNAPSHOT: EconomySnapshot = {
   uniqueWeapons: [uniq('Tabula Rasa', 150, 0.3)],
   uniqueArmours: [uniq('Belly of the Beast', 200, 0.4)],
   uniqueAccessories: [uniq('Headhunter', 80000, 160)],
-  uniqueFlasks: [], uniqueJewels: [], skillGems: [], maps: [], scarabs: [],
+  uniqueFlasks: [], uniqueJewels: [], skillGems: [], maps: [], scarabs: [], oils: [],
 }
 const deps: BuildCostDeps = { snapshot: SNAPSHOT, league: 'Mirage', today: '2026-06-14' }
 

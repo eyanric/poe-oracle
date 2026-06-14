@@ -26,7 +26,7 @@ export function getEconomyProvider(env: NodeJS.ProcessEnv = process.env): Econom
 
 const ITEM_FIELDS: Array<keyof EconomySnapshot> = [
   'essences', 'divCards', 'uniqueWeapons', 'uniqueArmours', 'uniqueAccessories',
-  'uniqueFlasks', 'uniqueJewels', 'skillGems', 'maps', 'scarabs',
+  'uniqueFlasks', 'uniqueJewels', 'skillGems', 'maps', 'scarabs', 'oils',
 ]
 
 /** Queries every provider and concatenates rows, each already tagged with `source`. */
@@ -60,7 +60,7 @@ export class MultiEconomyProvider implements EconomyProvider {
       fragments: snapshots.flatMap(s => s.fragments),
       essences: [], divCards: [], uniqueWeapons: [], uniqueArmours: [],
       uniqueAccessories: [], uniqueFlasks: [], uniqueJewels: [], skillGems: [],
-      maps: [], scarabs: [],
+      maps: [], scarabs: [], oils: [],
     }
     for (const field of ITEM_FIELDS) {
       ;(merged[field] as ItemPrice[]) = snapshots.flatMap(s => s[field] as ItemPrice[])

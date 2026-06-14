@@ -20,6 +20,7 @@ function makeSnapshot(over: Partial<EconomySnapshot> = {}): EconomySnapshot {
     skillGems: [],
     maps: [],
     scarabs: [],
+    oils: [],
     ...over,
   }
 }
