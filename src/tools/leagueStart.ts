@@ -10,7 +10,7 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { getPatchNotesRaw, PATCH_NOTE_SOURCES } from '../data/patchNotes'
 import { parsePatchNotes, summarizePatchNotes, type ParsedPatchNotes } from '../services/patchNotesParser'
-import { estimateBuildCostLive, type GearPiece, type BuildCostEstimate } from '../services/buildCost'
+import { estimateBuildCostLive, estimateBuildCostFromPobLive, type GearPiece, type BuildCostEstimate } from '../services/buildCost'
 import { emptyLeagueStartPlan, PREDICTIVE_CAVEAT } from '../services/leagueStartPlan'
 
 export function registerLeagueStartTools(server: McpServer): void {
@@ -59,9 +59,9 @@ function registerBuildCostTool(server: McpServer): void {
       description:
         'Price a build\'s gear list at current rates via the economy services and assign a budget ' +
         'tier (starter / functional / aspirational) in chaos + divine. Input is a plain item list ' +
-        '(a PoB import reduces to this — PoB parsing is a future hook). Rares are not indexed by ' +
-        'aggregators, so unpriced slots make the total a LOWER BOUND — flagged, with divine-denominated ' +
-        'sums preferred. Read-only; league + date stamped.',
+        'a plain item list, OR a PoB link/code via `pob` (parsed straight into a gear list). Rares are ' +
+        'not indexed by aggregators, so unpriced slots make the total a LOWER BOUND — flagged, with ' +
+        'divine-denominated sums preferred. Read-only; league + date stamped.',
       inputSchema: {
         items: z
           .array(
@@ -72,12 +72,19 @@ function registerBuildCostTool(server: McpServer): void {
               qty: z.number().optional().describe('Quantity (default 1).'),
             }),
           )
-          .describe('The gear list to price.'),
+          .optional()
+          .describe('The gear list to price (omit if using `pob`).'),
+        pob: z.string().optional().describe('A pobb.in/pastebin link or raw PoB export code — parsed into the gear list.'),
         league: z.string().optional().describe('League name. Defaults to the current challenge league.'),
       },
     },
-    async ({ items, league }) => {
-      const result = await estimateBuildCostLive(items as GearPiece[], league)
+    async ({ items, pob, league }) => {
+      if (!pob && (!items || items.length === 0)) {
+        return { content: [{ type: 'text', text: 'estimate_build_cost: provide either `items` or a `pob` link/code.' }], isError: true }
+      }
+      const result = pob
+        ? await estimateBuildCostFromPobLive(pob, league)
+        : await estimateBuildCostLive(items as GearPiece[], league)
       return { content: [{ type: 'text', text: renderBuildCost(result) }], structuredContent: result as unknown as Record<string, unknown> }
     },
   )

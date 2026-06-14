@@ -7,6 +7,7 @@ import { registerEconomyTools } from './tools/economy'
 import { registerAppraiseTool, registerPriceCheckItemTool, registerWatchTool } from './tools/appraise'
 import { registerCraftCostTool } from './tools/craft'
 import { registerLeagueStartTools } from './tools/leagueStart'
+import { registerPobTools } from './tools/pob'
 import { registerOptionalTools } from './optional/index'
 
 export const SERVER_NAME = 'poe-oracle'
@@ -23,6 +24,7 @@ export function createPoeMcpServer(): McpServer {
   registerWatchTool(server)
   registerCraftCostTool(server)
   registerLeagueStartTools(server)
+  registerPobTools(server)
 
   // OPTIONAL — gated (currently a stub; registers nothing).
   registerOptionalTools(server)

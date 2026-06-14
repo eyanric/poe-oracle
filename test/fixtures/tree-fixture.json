@@ -1,0 +1,13 @@
+{
+  "tree": "TestTree",
+  "nodes": {
+    "1": { "skill": 1, "name": "Class Start", "classStartIndex": 0, "stats": [], "in": [], "out": ["2"] },
+    "2": { "skill": 2, "name": "Strong", "stats": ["+10 to Strength"], "in": ["1"], "out": ["3"] },
+    "3": { "skill": 3, "name": "Crossroads", "stats": ["+10 to maximum Life"], "in": ["2"], "out": ["4", "100"] },
+    "4": { "skill": 4, "name": "Vitality", "stats": ["+12 to maximum Life"], "in": ["3"], "out": ["5"] },
+    "5": { "skill": 5, "name": "Nimble", "stats": ["+5 to Dexterity"], "in": ["4"], "out": [] },
+    "100": { "skill": 100, "name": "Chaos Inoculation", "isKeystone": true, "stats": ["Maximum Life becomes 1, removing all bonuses\nEnergy Shield protects Mana before Life"], "in": ["3"], "out": ["200"] },
+    "200": { "skill": 200, "name": "Written in Blood", "isNotable": true, "stats": ["10% increased maximum Life\n+20 to maximum Life"], "in": ["100"], "out": ["300"] },
+    "300": { "skill": 300, "name": "Life Mastery", "isMastery": true, "stats": ["+50 to maximum Life"], "in": ["200"], "out": [] }
+  }
+}

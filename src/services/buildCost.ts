@@ -14,6 +14,8 @@ import { searchEconomy } from './economySearch'
 import type { EconomySnapshot } from './economyTypes'
 import { getEconomyProvider } from './EconomyProvider'
 import { resolveCurrentLeague } from './LeagueResolver'
+import { parsePobCode, type ParsedPob } from './pobParser'
+import { getPobCode } from '../data/pob'
 
 export interface GearPiece {
   /** Slot label, e.g. "Weapon", "Body Armour", "Amulet". Free-form. */
@@ -119,4 +121,26 @@ export async function estimateBuildCostLive(items: GearPiece[], league?: string)
   const resolved = league ?? (await resolveCurrentLeague())
   const snapshot = await getEconomyProvider().getEconomySnapshot(resolved)
   return estimateBuildCost(items, { snapshot, league: resolved })
+}
+
+/**
+ * Convert a parsed PoB build into a priceable gear list (the PoB import hook Track B
+ * B2 left open). Uniques price by name; rares fall through to base type (unpriced,
+ * flagged) since aggregators don't index them.
+ */
+export function gearListFromPob(pob: ParsedPob): GearPiece[] {
+  const out: GearPiece[] = []
+  for (const it of pob.items) {
+    const isUnique = it.rarity?.toUpperCase() === 'UNIQUE'
+    const name = isUnique ? it.name || it.baseType : it.baseType || it.name
+    if (!name) continue
+    out.push({ slot: it.slot ?? it.baseType ?? 'Item', name, category: isUnique ? 'unique' : undefined })
+  }
+  return out
+}
+
+/** Estimate a build's cost straight from a PoB link / export code. */
+export async function estimateBuildCostFromPobLive(source: string, league?: string): Promise<BuildCostEstimate> {
+  const { code } = await getPobCode(source)
+  return estimateBuildCostLive(gearListFromPob(parsePobCode(code)), league)
 }

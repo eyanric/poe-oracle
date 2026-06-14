@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { estimateBuildCost, classifyTier, type GearPiece, type BuildCostDeps } from '../src/services/buildCost'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { estimateBuildCost, classifyTier, gearListFromPob, type GearPiece, type BuildCostDeps } from '../src/services/buildCost'
+import { parsePobCode } from '../src/services/pobParser'
 import type { EconomySnapshot, ItemPrice, CurrencyPrice } from '../src/services/economyTypes'
 
 const cur = (name: string, chaos: number): CurrencyPrice => ({ currencyTypeName: name, chaosEquivalent: chaos, receive: { value: chaos, listing_count: 99 }, source: 'test' })
@@ -59,5 +62,29 @@ describe('estimateBuildCost', () => {
   it('respects quantity', () => {
     const r = estimateBuildCost([{ slot: 'Body Armour', name: 'Tabula Rasa', category: 'unique', qty: 2 }], deps)
     expect(r.totalChaos).toBeCloseTo(300, 6)
+  })
+})
+
+describe('gearListFromPob → build cost (Phase 3 integration)', () => {
+  const endgame = parsePobCode(
+    readFileSync(fileURLToPath(new URL('./fixtures/pob-endgame.txt', import.meta.url)), 'utf8'),
+  )
+
+  it('converts a parsed PoB into a priceable gear list', () => {
+    const gear = gearListFromPob(endgame)
+    expect(gear.find(g => g.slot === 'Body Armour')).toMatchObject({ name: 'Belly of the Beast', category: 'unique' })
+    expect(gear.find(g => g.slot === 'Belt')).toMatchObject({ name: 'Headhunter', category: 'unique' })
+    // the rare ring falls through to its base type (will be unpriced, as expected)
+    expect(gear.find(g => g.slot === 'Ring 1')?.category).toBeUndefined()
+  })
+
+  it('a parsed export produces a cost estimate (uniques priced, rares flagged)', () => {
+    const r = estimateBuildCost(gearListFromPob(endgame), deps)
+    expect(r.totalChaos).toBeGreaterThan(0)
+    expect(r.pieces.find(p => p.name === 'Belly of the Beast')!.chaos).toBe(200)
+    expect(r.pieces.find(p => p.name === 'Headhunter')!.chaos).toBe(80000)
+    expect(r.unpricedSlots).toContain('Ring 1') // rare ring not indexed
+    expect(r.tier).toBe('aspirational')
+    expect(r.lowConfidence).toBe(true) // unpriced rare → lower bound
   })
 })
