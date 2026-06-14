@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
-  nCr, pSlotSurvive, recombineIlvl, analyzeRecombine, recombineModule, RECOMBINATOR_COUNT_DIST,
+  nCr, pSlotSurvive, pSlotSurviveNNN, recombineIlvl, analyzeRecombine, recombineModule, RECOMBINATOR_COUNT_DIST,
 } from '../src/services/recombine'
+import type { RepoeMod } from '../src/data/repoe'
 import { evaluateInputs, evaluateMethod, type DesiredMod } from '../src/services/craftMethods'
 import { newItemState, type Affix, type ItemState } from '../src/services/itemState'
 import type { InputSet, CraftDataContext, ModuleParams } from '../src/services/craftModule'
@@ -79,6 +80,69 @@ describe('analyzeRecombine', () => {
     expect(r.exclusiveCollision).toBe(true)
     expect(r.pTarget).toBe(0)
     expect(r.reason).toMatch(/exclusive/i)
+  })
+})
+
+// ── NNN (non-native modifiers) ──────────────────────────────────────────────────
+const mod = (spawn: { tag: string; weight: number }[]): RepoeMod => ({
+  domain: 'item', name: 'x', type: 'x', required_level: 1, is_essence_only: false, generation_type: 'prefix',
+  groups: [], spawn_weights: spawn, generation_weights: [], implicit_tags: [], adds_tags: [],
+})
+const aff = (group: string, slot: 'prefix' | 'suffix', opts: Partial<Affix> = {}): Affix => ({ modId: group, group, slot, ...opts })
+const item = (itemClass: string, ilvl: number, tags: string[], affixes: Affix[]): ItemState => newItemState({ base: 'x', itemClass, ilvl, tags, affixes })
+
+describe('NNN (non-native modifiers)', () => {
+  it('reject-and-redraw lever: NNN padding raises survival of high-count targets', () => {
+    // want 3, pool exactly 3 (no pad) vs pool 6 (3 native + 3 NNN pad)
+    expect(pSlotSurviveNNN(3, 3, 3)).toBeCloseTo(0.3, 6)
+    expect(pSlotSurviveNNN(6, 3, 3)).toBeCloseTo(0.6, 6)
+    expect(pSlotSurviveNNN(6, 3, 3)).toBeGreaterThan(pSlotSurviveNNN(3, 3, 3))
+  })
+
+  it('analyzeRecombine: NNN pad raises P(target) (lever exposed)', () => {
+    const A = item('Ring', 84, [], [aff('Life', 'prefix'), aff('Phys', 'prefix'), aff('Cold', 'prefix')])
+    const B = item('Ring', 84, [], [aff('Pad1', 'prefix', { nonNative: true }), aff('Pad2', 'prefix', { nonNative: true }), aff('Pad3', 'prefix', { nonNative: true })])
+    const r = analyzeRecombine(A, B, [want('Life'), want('Phys'), want('Cold')])
+    expect(r.nnnLever.withPad).toBeGreaterThan(r.nnnLever.withoutPad)
+    expect(r.nnnLever.withoutPad).toBeCloseTo(0.3, 2)
+    expect(r.pTarget).toBeCloseTo(0.6, 2)
+  })
+
+  it('base-choice branch flips legality (data-derived): native to A-base, NNN on B-base', () => {
+    const mods = { OnlyDex: mod([{ tag: 'dex_armour', weight: 1000 }, { tag: 'default', weight: 0 }]) }
+    const A = item('Shield', 84, ['dex_armour', 'default'], [aff('OnlyDex', 'prefix'), aff('IntLife', 'prefix')])
+    const B = item('Shield', 84, ['int_armour', 'default'], [aff('SpellDmg', 'prefix')])
+    const withFlip = analyzeRecombine(A, B, [want('OnlyDex')], mods) // B-base branch zeroes (OnlyDex illegal on int)
+    const noData = analyzeRecombine(A, B, [want('OnlyDex')]) // no legality data → native both branches
+    expect(withFlip.pTarget).toBeGreaterThan(0)
+    expect(withFlip.pTarget).toBeLessThan(noData.pTarget) // the int-base branch contributes 0
+    expect(withFlip.pTarget).toBeCloseTo(noData.pTarget / 2, 2)
+  })
+
+  it('fractured retention is tied to the base choice (kept only if its base wins)', () => {
+    const A = item('Ring', 84, [], [aff('Life', 'prefix')])
+    const B = item('Ring', 84, [], [aff('FracLife', 'suffix', { fractured: true })])
+    const r = analyzeRecombine(A, B, [want('FracLife', 'suffix')])
+    // survives only in the B-final branch (50%): 0.5 × pSlotSurvive(1,1)=0.9
+    expect(r.pTarget).toBeCloseTo(0.45, 2)
+  })
+
+  it('exclusive + NNN compose: one exclusive is fine, two still brick', () => {
+    const padded = analyzeRecombine(
+      item('Ring', 84, [], [aff('Excl', 'prefix', { exclusive: true }), aff('Life', 'prefix')]),
+      item('Ring', 84, [], [aff('Pad', 'prefix', { nonNative: true })]),
+      [want('Excl'), want('Life')],
+    )
+    expect(padded.supported).toBe(true)
+    expect(padded.pTarget).toBeGreaterThan(0)
+
+    const twoExcl = analyzeRecombine(
+      item('Ring', 84, [], [aff('Excl1', 'prefix', { exclusive: true })]),
+      item('Ring', 84, [], [aff('Excl2', 'prefix', { exclusive: true }), aff('Pad', 'prefix', { nonNative: true })]),
+      [want('Excl1'), want('Excl2')],
+    )
+    expect(twoExcl.exclusiveCollision).toBe(true)
+    expect(twoExcl.pTarget).toBe(0)
   })
 })
 

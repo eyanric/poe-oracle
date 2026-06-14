@@ -29,6 +29,8 @@ export interface Affix {
   fractured?: boolean
   /** "Exclusive" modifier (Settlers recombinator class): at most one survives a combine. */
   exclusive?: boolean
+  /** Fallback NNN marker (when no mod data to derive legality): non-native to the final base. */
+  nonNative?: boolean
 }
 
 /** Active meta-mods that reshape what subsequent crafts can do. */

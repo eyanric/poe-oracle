@@ -6,7 +6,8 @@
  * Leads with: arity-2 routed through evaluateInputs; quantitative data is flagged.
  */
 import { estimateRecombine, estimateRecombineLive } from '../src/services/craftCost.js'
-import { getMods } from '../src/data/repoe.js'
+import { getMods, getBaseItems } from '../src/data/repoe.js'
+import { isNative } from '../src/services/modLegality.js'
 import { getEconomyProvider } from '../src/services/EconomyProvider.js'
 import { searchEconomy } from '../src/services/economySearch.js'
 import { resolveCurrentLeague } from '../src/services/LeagueResolver.js'
@@ -45,6 +46,34 @@ const exA = { itemClass: 'Ring', ilvl: 84, valueChaos: 50, prefixes: [{ group: '
 const exB = { itemClass: 'Ring', ilvl: 84, valueChaos: 50, prefixes: [{ group: 'ExclTwo', desired: true, exclusive: true }] }
 const ex = estimateRecombine(exA, exB, deps)
 ok('two exclusive desired mods → unsupported/brick (≤1 survives)', !ex.supported && ex.exclusiveCollision, ex.reason)
+
+console.log('\n--- NNN: isNative on real data (spell suppress) ---')
+const bases = await getBaseItems()
+const suppress = Object.values(mods).find(m => /Suppress Spell Damage/i.test(m.text || '') && m.domain === 'item'
+  && (m.generation_type === 'prefix' || m.generation_type === 'suffix')
+  && (m.spawn_weights || []).some(w => w.weight > 0 && w.tag !== 'default'))
+if (suppress) {
+  // native base = one where the mod actually rolls (isNative true, after exclusions); off base = a real INT body.
+  const nativeBase = Object.values(bases).find(b => b.release_state === 'released' && isNative(suppress, new Set(b.tags), 84))
+  const offBase = Object.values(bases).find(b => b.release_state === 'released' && b.name === 'Vaal Regalia')
+  if (nativeBase && offBase) {
+    const onNative = isNative(suppress, new Set(nativeBase.tags), 84)
+    const offNative = isNative(suppress, new Set(offBase.tags), 84)
+    console.log(`  suppress native on ${nativeBase.name} (${nativeBase.item_class})=${onNative}, on ${offBase.name} (INT)=${offNative}`)
+    ok('isNative true on a base it rolls on, false on a real INT base (data-derived, exclusions honoured)', onNative === true && offNative === false)
+  } else { ok('found native/off bases for isNative check', false, 'could not locate suitable bases') }
+} else { ok('found spell-suppress mod for isNative check', false, 'mod not found') }
+
+console.log('\n--- NNN padding lever (padded vs unpadded) ---')
+const target3 = { itemClass: 'Ring', ilvl: 84, valueChaos: 10,
+  prefixes: [{ group: 'Life', desired: true }, { group: 'Phys', desired: true }, { group: 'Cold', desired: true }] }
+const padDonor = { itemClass: 'Ring', ilvl: 84, valueChaos: 5,
+  prefixes: [{ group: 'Pad1', nonNative: true }, { group: 'Pad2', nonNative: true }, { group: 'Pad3', nonNative: true }] }
+const cleanDonor = { itemClass: 'Ring', ilvl: 84, valueChaos: 5, prefixes: [] }
+const padded = estimateRecombine(target3, padDonor, deps)
+const unpadded = estimateRecombine(target3, cleanDonor, deps)
+console.log(`  want 3 prefixes: unpadded P=${(unpadded.pTarget * 100).toFixed(1)}% · padded(3 NNN) P=${(padded.pTarget * 100).toFixed(1)}% · lever ${(padded.nnnLever.withoutPad * 100).toFixed(1)}%→${(padded.nnnLever.withPad * 100).toFixed(1)}%`)
+ok('NNN pad raises P(target) for the high-count target', padded.pTarget > unpadded.pTarget && padded.nnnLever.withPad > padded.nnnLever.withoutPad)
 
 console.log('\n--- league gating (current league) ---')
 const gated = await estimateRecombineLive(itemA, itemB, league)

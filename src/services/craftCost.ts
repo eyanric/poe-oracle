@@ -471,6 +471,10 @@ export interface RecombineAffixSpec {
   desired?: boolean
   /** Settlers "exclusive" modifier (≤1 survives) — caller-supplied (no data flag). */
   exclusive?: boolean
+  /** Non-native pad (self-rejects on the final base) — fallback when modId can't be resolved from data. */
+  nonNative?: boolean
+  /** Fractured mod (retained only if its origin item is the chosen base). */
+  fractured?: boolean
 }
 export interface RecombineInput {
   baseName?: string
@@ -495,6 +499,8 @@ export type RecombineEstimate = {
   pTarget: number
   brickProb: number
   exclusiveCollision: boolean
+  /** NNN padding lever: P(target) without the pad vs with it. */
+  nnnLever: { withoutPad: number; withPad: number }
   expectedAttempts: number
   consumables: PricedConsumable[]
   totalChaos: number | null
@@ -506,7 +512,7 @@ export type RecombineEstimate = {
 }
 
 function toState(i: RecombineInput): { state: import('./itemState').ItemState; desired: DesiredMod[] } {
-  const mk = (a: RecombineAffixSpec, slot: Slot): Affix => ({ modId: a.modId ?? a.group, group: a.group, slot, exclusive: a.exclusive, text: a.label })
+  const mk = (a: RecombineAffixSpec, slot: Slot): Affix => ({ modId: a.modId ?? a.group, group: a.group, slot, exclusive: a.exclusive, nonNative: a.nonNative, fractured: a.fractured, text: a.label })
   const affixes: Affix[] = [...(i.prefixes ?? []).map(a => mk(a, 'prefix')), ...(i.suffixes ?? []).map(a => mk(a, 'suffix'))]
   const desired: DesiredMod[] = [
     ...(i.prefixes ?? []).filter(a => a.desired).map(a => ({ slot: 'prefix' as Slot, group: a.group, modId: a.modId, label: a.label ?? a.group })),
@@ -527,7 +533,7 @@ export function estimateRecombine(a: RecombineInput, b: RecombineInput, deps: Cr
   const divineChaos = divineChaosOf(deps.snapshot)
   const A = toState(a), B = toState(b)
   const desired = [...A.desired, ...B.desired].filter((d, i, arr) => arr.findIndex(x => x.slot === d.slot && (x.modId ?? x.group) === (d.modId ?? d.group)) === i)
-  const analysis = analyzeRecombine(A.state, B.state, desired)
+  const analysis = analyzeRecombine(A.state, B.state, desired, deps.mods)
   const outputIlvl = recombineIlvl(a.ilvl, b.ilvl)
   const recombinator = recombinatorCurrencyFor(a.itemClass)
 
@@ -539,7 +545,7 @@ export function estimateRecombine(a: RecombineInput, b: RecombineInput, deps: Cr
     prefixPool: analysis.prefixPool, suffixPool: analysis.suffixPool,
     pPrefix: analysis.pPrefix, pSuffix: analysis.pSuffix, pTarget: analysis.pTarget,
     brickProb: analysis.pTarget > 0 ? 1 - analysis.pTarget : 1, exclusiveCollision: analysis.exclusiveCollision,
-    divineChaos, notes: ev.notes,
+    nnnLever: analysis.nnnLever, divineChaos, notes: ev.notes,
   }
   if (!ev.supported) {
     return { ...base, supported: false, reason: ev.reason, expectedAttempts: Infinity, consumables: [], totalChaos: null, totalDivine: null, risk: null, lowConfidence: true }

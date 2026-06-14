@@ -19,8 +19,10 @@
  * exclusivity is caller-supplied (`Affix.exclusive`) — structure in place, unparameterised.
  * Stage-B compounding is exact.
  */
-import { type ItemState, type Slot } from './itemState'
-import type { CraftModule, InputSet, ModuleParams, OutcomeDistribution } from './craftModule'
+import { type ItemState, type Slot, type Affix } from './itemState'
+import { isNative } from './modLegality'
+import type { RepoeMod } from '../data/repoe'
+import type { CraftModule, InputSet, CraftDataContext, ModuleParams, OutcomeDistribution } from './craftModule'
 import type { ExpectedAttemptsResult, DesiredMod } from './craftMethods'
 
 /**
@@ -47,17 +49,27 @@ export function nCr(n: number, k: number): number {
 }
 
 /**
- * P(all `d` desired mods of one slot survive), given a combined pool of `n` of that slot.
- * = Σ_c P(finalCount=c | n) · C(n−d, c−d)/C(n, c). Exact for the Stage-B selection.
+ * P(all `d` desired native mods of one slot survive), with NNN reject-and-redraw.
+ * Stage-A rolls the final count `c` keyed on the TOTAL pool `nTotal` (NNN padding inflates
+ * it); Stage-B then selects from the `mNative` native-eligible mods only (NNN self-reject and
+ * are redrawn). = Σ_c P(c | nTotal) · C(mNative−d, c'−d)/C(mNative, c'), c' = min(c, mNative, 3).
+ * Exact selection given the (flagged) Stage-A table. `pSlotSurvive(n,d) = pSlotSurviveNNN(n,n,d)`.
  */
-export function pSlotSurvive(n: number, d: number, dist = RECOMBINATOR_COUNT_DIST): number {
+export function pSlotSurviveNNN(nTotal: number, mNative: number, d: number, dist = RECOMBINATOR_COUNT_DIST): number {
   if (d === 0) return 1
-  if (d > 3 || d > n) return 0
-  const table = dist[Math.min(n, 6)] ?? [1]
+  if (d > 3 || d > mNative) return 0
+  const table = dist[Math.min(nTotal, 6)] ?? [1]
   let p = 0
-  for (let c = d; c < table.length; c++) p += table[c] * (nCr(n - d, c - d) / nCr(n, c))
+  for (let c = d; c < table.length; c++) {
+    const cPrime = Math.min(c, mNative, 3)
+    if (cPrime < d) continue
+    p += table[c] * (nCr(mNative - d, cPrime - d) / nCr(mNative, cPrime))
+  }
   return p
 }
+
+/** All-native slot survival (no NNN). */
+export const pSlotSurvive = (n: number, d: number, dist = RECOMBINATOR_COUNT_DIST): number => pSlotSurviveNNN(n, n, d, dist)
 
 /** Output item level per the Settlers formula. */
 export const recombineIlvl = (i1: number, i2: number): number => Math.min(Math.max(i1, i2), Math.floor((i1 + i2) / 2) + 2)
@@ -74,31 +86,72 @@ export interface RecombineAnalysis {
   prefixPool: number
   suffixPool: number
   exclusiveCollision: boolean
+  /** NNN padding lever: P(target) with the NNN pad present vs if it weren't there. */
+  nnnLever: { withoutPad: number; withPad: number }
 }
 
-/** Pure recombine analysis from two input states + a desired set. */
-export function analyzeRecombine(a: ItemState, b: ItemState, desired: DesiredMod[]): RecombineAnalysis {
+/** Is this pooled affix native to the chosen final base? Data-derived; falls back to the flag. */
+function affixNative(affix: Affix, finalTags: Set<string>, ilvl: number, mods?: Record<string, RepoeMod>): boolean {
+  const m = mods && affix.modId ? mods[affix.modId] : undefined
+  return m ? isNative(m, finalTags, ilvl) : !affix.nonNative
+}
+
+interface SlotBranch { p: number; pNoPad: number; nTotal: number; mNative: number; targetNative: boolean }
+
+function slotBranch(final: ItemState, other: ItemState, slot: Slot, desired: DesiredMod[], ilvl: number, mods?: Record<string, RepoeMod>): SlotBranch {
+  const finalTags = new Set(final.tags)
+  // Fractured mods are retained only if their origin base is the chosen base → drop the other's fractured.
+  const pool = [...affixesOfSlot(final, slot), ...affixesOfSlot(other, slot).filter(a => !a.fractured)]
+  const native = pool.filter(a => affixNative(a, finalTags, ilvl, mods))
+  const dHere = desired.filter(d => d.slot === slot)
+  // every desired must be present AND native on this base/branch (else it can't survive here).
+  const targetNative = dHere.every(d => native.some(a => matches(d, a)))
+  const d = dHere.length
+  const nTotal = pool.length
+  const mNative = native.length
+  if (!targetNative) return { p: 0, pNoPad: 0, nTotal, mNative, targetNative: false }
+  return { p: pSlotSurviveNNN(nTotal, mNative, d), pNoPad: pSlotSurviveNNN(mNative, mNative, d), nTotal, mNative, targetNative: true }
+}
+
+/**
+ * Pure recombine analysis from two inputs + a desired set, NNN-aware. Computes over BOTH
+ * 50/50 base-choice branches (legality flips with the chosen base) and exposes the NNN
+ * padding lever. `mods` (optional) enables data-derived legality; without it, affix
+ * `nonNative` flags are used. Stage-A table + exclusive set remain low-confidence.
+ */
+export function analyzeRecombine(a: ItemState, b: ItemState, desired: DesiredMod[], mods?: Record<string, RepoeMod>): RecombineAnalysis {
   const combinedPre = [...affixesOfSlot(a, 'prefix'), ...affixesOfSlot(b, 'prefix')]
   const combinedSuf = [...affixesOfSlot(a, 'suffix'), ...affixesOfSlot(b, 'suffix')]
   const find = (d: DesiredMod) => (d.slot === 'prefix' ? combinedPre : combinedSuf).find(x => matches(d, x))
+  const empty = { pPrefix: 0, pSuffix: 0, pTarget: 0, prefixPool: combinedPre.length, suffixPool: combinedSuf.length, nnnLever: { withoutPad: 0, withPad: 0 } }
 
-  // every desired mod must already exist on an input (recombine combines, never creates).
   const missing = desired.filter(d => !find(d))
   if (missing.length) {
-    return { supported: false, reason: `desired mod(s) not present on either input: ${missing.map(m => m.label).join(', ')}`, pPrefix: 0, pSuffix: 0, pTarget: 0, prefixPool: combinedPre.length, suffixPool: combinedSuf.length, exclusiveCollision: false }
+    return { supported: false, reason: `desired mod(s) not present on either input: ${missing.map(m => m.label).join(', ')}`, exclusiveCollision: false, ...empty }
   }
-
   // exclusive collision: at most ONE exclusive mod survives ⇒ wanting two is impossible.
-  const desiredExclusive = desired.filter(d => find(d)?.exclusive).length
-  if (desiredExclusive > 1) {
-    return { supported: true, reason: `two exclusive modifiers can't co-exist on a recombine (≤1 survives) — guaranteed brick`, pPrefix: 0, pSuffix: 0, pTarget: 0, prefixPool: combinedPre.length, suffixPool: combinedSuf.length, exclusiveCollision: true }
+  if (desired.filter(d => find(d)?.exclusive).length > 1) {
+    return { supported: true, reason: `two exclusive modifiers can't co-exist on a recombine (≤1 survives) — guaranteed brick`, exclusiveCollision: true, ...empty }
   }
 
-  const dPre = desired.filter(d => d.slot === 'prefix').length
-  const dSuf = desired.filter(d => d.slot === 'suffix').length
-  const pPrefix = pSlotSurvive(combinedPre.length, dPre)
-  const pSuffix = pSlotSurvive(combinedSuf.length, dSuf)
-  return { supported: true, pPrefix, pSuffix, pTarget: pPrefix * pSuffix, prefixPool: combinedPre.length, suffixPool: combinedSuf.length, exclusiveCollision: false }
+  const ilvl = recombineIlvl(a.ilvl, b.ilvl)
+  // both 50/50 base-choice branches; legality is computed against the chosen base.
+  const branches = [{ final: a, other: b }, { final: b, other: a }].map(({ final, other }) => {
+    const pre = slotBranch(final, other, 'prefix', desired, ilvl, mods)
+    const suf = slotBranch(final, other, 'suffix', desired, ilvl, mods)
+    return { pre, suf, joint: pre.p * suf.p, jointNoPad: pre.pNoPad * suf.pNoPad }
+  })
+  const avg = (f: (x: typeof branches[number]) => number) => 0.5 * f(branches[0]) + 0.5 * f(branches[1])
+  return {
+    supported: true,
+    pPrefix: avg(b2 => b2.pre.p),
+    pSuffix: avg(b2 => b2.suf.p),
+    pTarget: avg(b2 => b2.joint),
+    prefixPool: combinedPre.length,
+    suffixPool: combinedSuf.length,
+    exclusiveCollision: false,
+    nnnLever: { withoutPad: avg(b2 => b2.jointNoPad), withPad: avg(b2 => b2.joint) },
+  }
 }
 
 /** Recombinator currency by the item category being combined. */
@@ -109,20 +162,23 @@ function recombinatorFor(itemClass: string): string {
   return 'Weapon Recombinator'
 }
 
-function evaluateRecombine(a: ItemState, b: ItemState, params: ModuleParams): ExpectedAttemptsResult {
-  const r = analyzeRecombine(a, b, params.desired)
+function evaluateRecombine(a: ItemState, b: ItemState, params: ModuleParams, mods?: Record<string, RepoeMod>): ExpectedAttemptsResult {
+  const r = analyzeRecombine(a, b, params.desired, mods)
   const currency = recombinatorFor(a.itemClass)
   const ilvl = recombineIlvl(a.ilvl, b.ilvl)
   const [vA = 0, vB = 0] = params.inputValuesChaos ?? []
   const notes: string[] = [
-    `Recombine (${currency}): base 50/50 of the two inputs, output ilvl ${ilvl}; pools prefix=${r.prefixPool} suffix=${r.suffixPool} (independent).`,
-    'Stage-A count distribution is a flagged representative table; Stage-B selection is exact; exclusive set is caller-supplied (low-confidence). Cap 3/3.',
+    `Recombine (${currency}): base 50/50 of the two inputs, output ilvl ${ilvl}; pools prefix=${r.prefixPool} suffix=${r.suffixPool} (independent, NNN reject-and-redraw over both base branches).`,
+    'Stage-A count distribution is a flagged representative table; Stage-B selection is exact; exclusive set + NNN replacement semantics are low-confidence. Cap 3/3.',
   ]
   if (!r.supported) return { method: 'recombine', supported: false, reason: r.reason, expectedAttempts: Infinity, perAttemptProb: 0, consumables: [], lowConfidence: true, notes }
   if (r.exclusiveCollision || r.pTarget <= 0) {
     return { method: 'recombine', supported: false, reason: r.reason ?? 'target set has probability 0', expectedAttempts: Infinity, perAttemptProb: 0, consumables: [], lowConfidence: true, notes }
   }
-  notes.push(`P(target) = P(prefixes ${(r.pPrefix * 100).toFixed(1)}%) × P(suffixes ${(r.pSuffix * 100).toFixed(1)}%) = ${(r.pTarget * 100).toFixed(1)}% per combine; brick (target not achieved) ≈ ${((1 - r.pTarget) * 100).toFixed(1)}%.`)
+  notes.push(`P(target) ${(r.pTarget * 100).toFixed(1)}% per combine (pre ${(r.pPrefix * 100).toFixed(1)}% × suf ${(r.pSuffix * 100).toFixed(1)}%, branch-averaged); brick ≈ ${((1 - r.pTarget) * 100).toFixed(1)}%.`)
+  if (r.nnnLever.withPad > r.nnnLever.withoutPad + 1e-9) {
+    notes.push(`NNN padding lever: P(target) ${(r.nnnLever.withoutPad * 100).toFixed(1)}% → ${(r.nnnLever.withPad * 100).toFixed(1)}% with the non-native pad (junk inflates the count, self-rejects, freeing slots for the natives).`)
+  }
   const extra = [
     { chaos: vA, label: 'input item A', qty: 1 },
     { chaos: vB, label: 'input item B', qty: 1 },
@@ -147,27 +203,27 @@ export const recombineModule: CraftModule = {
   arity: 2,
   // Recombinators are not guaranteed every league — confirm 3.28 availability. (See report.)
   leagues: ['Settlers', 'Kalguur'],
-  evaluate: (inputs: InputSet, _data, params) => {
+  evaluate: (inputs: InputSet, data: CraftDataContext, params) => {
     const [a, b] = inputs as readonly [ItemState, ItemState]
-    return evaluateRecombine(a, b, params)
+    return evaluateRecombine(a, b, params, data.mods)
   },
-  applicable: (inputs: InputSet, _data, params) => {
+  applicable: (inputs: InputSet, data: CraftDataContext, params) => {
     if (inputs.length !== 2) return { ok: false, reason: 'recombine needs exactly two input items' }
     const [a, b] = inputs as readonly [ItemState, ItemState]
-    const r = analyzeRecombine(a, b, params.desired)
+    const r = analyzeRecombine(a, b, params.desired, data.mods)
     return { ok: r.supported && r.pTarget > 0, reason: r.reason }
   },
-  outcomes: (inputs: InputSet, _data, params) => {
+  outcomes: (inputs: InputSet, data: CraftDataContext, params) => {
     const [a, b] = inputs as readonly [ItemState, ItemState]
-    return outcomes(a, b, params, evaluateRecombine(a, b, params))
+    return outcomes(a, b, params, evaluateRecombine(a, b, params, data.mods))
   },
-  cost: (inputs: InputSet, _data, params) => {
+  cost: (inputs: InputSet, data: CraftDataContext, params) => {
     const [a, b] = inputs as readonly [ItemState, ItemState]
-    const r = evaluateRecombine(a, b, params)
-    return { steps: r.blueprint?.steps ?? [], lowConfidence: true, notes: ['Stage-A table + exclusive set are low-confidence'] }
+    const r = evaluateRecombine(a, b, params, data.mods)
+    return { steps: r.blueprint?.steps ?? [], lowConfidence: true, notes: ['Stage-A table + exclusive set + NNN replacement are low-confidence'] }
   },
-  toRiskSteps: (inputs: InputSet, _data, params) => {
+  toRiskSteps: (inputs: InputSet, data: CraftDataContext, params) => {
     const [a, b] = inputs as readonly [ItemState, ItemState]
-    return evaluateRecombine(a, b, params).blueprint?.steps ?? []
+    return evaluateRecombine(a, b, params, data.mods).blueprint?.steps ?? []
   },
 }
