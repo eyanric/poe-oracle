@@ -1,0 +1,406 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`method-module parity matrix (zero behaviour change) > alt-regal-1 output is stable 1`] = `
+{
+  "consumables": [
+    {
+      "chaosTotal": 0.1875,
+      "low": true,
+      "name": "Orb of Alteration",
+      "qty": 1.875,
+    },
+    {
+      "chaosTotal": 0.2,
+      "low": true,
+      "name": "Regal Orb",
+      "qty": 1,
+    },
+  ],
+  "expectedAttempts": 1.875,
+  "lowConfidence": true,
+  "method": "alt → regal",
+  "perAttemptProb": 0.5333,
+  "reason": undefined,
+  "risk": {
+    "bricks": [],
+    "category": "gamble",
+    "determinism": 0.752,
+    "dist": {
+      "mean": 0.3875,
+      "method": "closed-form",
+      "p50": 0.3,
+      "p90": 0.6,
+      "p95": 0.6,
+    },
+  },
+  "supported": true,
+  "totalChaos": 0.3875,
+  "totalDivine": 0.0008,
+  "verdict": {
+    "confidence": "low",
+    "decision": "unknown",
+    "marginChaos": null,
+    "riskAdjusted": false,
+  },
+}
+`;
+
+exports[`method-module parity matrix (zero behaviour change) > alt-regal-2 output is stable 1`] = `
+{
+  "consumables": [
+    {
+      "chaosTotal": 0.3,
+      "low": true,
+      "name": "Orb of Alteration",
+      "qty": 3,
+    },
+    {
+      "chaosTotal": 0.2,
+      "low": true,
+      "name": "Regal Orb",
+      "qty": 1,
+    },
+  ],
+  "expectedAttempts": 3,
+  "lowConfidence": true,
+  "method": "alt → regal",
+  "perAttemptProb": 0.3333,
+  "reason": undefined,
+  "risk": {
+    "bricks": [],
+    "category": "grind",
+    "determinism": 0.671,
+    "dist": {
+      "mean": 0.5,
+      "method": "closed-form",
+      "p50": 0.4,
+      "p90": 0.8,
+      "p95": 1,
+    },
+  },
+  "supported": true,
+  "totalChaos": 0.5,
+  "totalDivine": 0.001,
+  "verdict": {
+    "confidence": "low",
+    "decision": "unknown",
+    "marginChaos": null,
+    "riskAdjusted": false,
+  },
+}
+`;
+
+exports[`method-module parity matrix (zero behaviour change) > bench output is stable 1`] = `
+{
+  "consumables": [
+    {
+      "chaosTotal": 0.2,
+      "low": true,
+      "name": "bench: +(80-89) to maximum Life (Orb of Alteration)",
+      "qty": 2,
+    },
+  ],
+  "expectedAttempts": 1,
+  "lowConfidence": true,
+  "method": "bench craft",
+  "perAttemptProb": 1,
+  "reason": undefined,
+  "risk": {
+    "bricks": [],
+    "category": "deterministic",
+    "determinism": 1,
+    "dist": {
+      "mean": 0.2,
+      "method": "point",
+      "p50": 0.2,
+      "p90": 0.2,
+      "p95": 0.2,
+    },
+  },
+  "supported": true,
+  "totalChaos": 0.2,
+  "totalDivine": 0.0004,
+  "verdict": {
+    "confidence": "low",
+    "decision": "unknown",
+    "marginChaos": null,
+    "riskAdjusted": false,
+  },
+}
+`;
+
+exports[`method-module parity matrix (zero behaviour change) > chaos-spam output is stable 1`] = `
+{
+  "consumables": [
+    {
+      "chaosTotal": 1.0385,
+      "low": false,
+      "name": "Chaos Orb",
+      "qty": 1.0385,
+    },
+  ],
+  "expectedAttempts": 1.0385,
+  "lowConfidence": true,
+  "method": "chaos-spam",
+  "perAttemptProb": 0.963,
+  "reason": undefined,
+  "risk": {
+    "bricks": [],
+    "category": "gamble",
+    "determinism": 0.839,
+    "dist": {
+      "mean": 1.0385,
+      "method": "closed-form",
+      "p50": 1,
+      "p90": 1,
+      "p95": 1,
+    },
+  },
+  "supported": true,
+  "totalChaos": 1.0385,
+  "totalDivine": 0.0021,
+  "verdict": {
+    "confidence": "low",
+    "decision": "unknown",
+    "marginChaos": null,
+    "riskAdjusted": false,
+  },
+}
+`;
+
+exports[`method-module parity matrix (zero behaviour change) > essence output is stable 1`] = `
+{
+  "consumables": [
+    {
+      "chaosTotal": 3,
+      "low": false,
+      "name": "Deafening Essence of Greed",
+      "qty": 1,
+    },
+  ],
+  "expectedAttempts": 1,
+  "lowConfidence": false,
+  "method": "essence (Deafening Essence of Greed)",
+  "perAttemptProb": 1,
+  "reason": undefined,
+  "risk": {
+    "bricks": [],
+    "category": "deterministic",
+    "determinism": 1,
+    "dist": {
+      "mean": 3,
+      "method": "point",
+      "p50": 3,
+      "p90": 3,
+      "p95": 3,
+    },
+  },
+  "supported": true,
+  "totalChaos": 3,
+  "totalDivine": 0.006,
+  "verdict": {
+    "confidence": "low",
+    "decision": "unknown",
+    "marginChaos": null,
+    "riskAdjusted": false,
+  },
+}
+`;
+
+exports[`method-module parity matrix (zero behaviour change) > multimod output is stable 1`] = `
+{
+  "consumables": [
+    {
+      "chaosTotal": 1000,
+      "low": false,
+      "name": "meta: Can have multiple Crafted Modifiers (Divine Orb)",
+      "qty": 2,
+    },
+    {
+      "chaosTotal": 0.2,
+      "low": true,
+      "name": "bench: +(80-89) to maximum Life (Orb of Alteration)",
+      "qty": 2,
+    },
+    {
+      "chaosTotal": 1,
+      "low": false,
+      "name": "bench: +(40-45)% to Fire Resistance (Orb of Alchemy)",
+      "qty": 2,
+    },
+  ],
+  "expectedAttempts": 1,
+  "lowConfidence": true,
+  "method": "multimod",
+  "perAttemptProb": 1,
+  "reason": undefined,
+  "risk": {
+    "bricks": [],
+    "category": "deterministic",
+    "determinism": 1,
+    "dist": {
+      "mean": 1001.2,
+      "method": "point",
+      "p50": 1001.2,
+      "p90": 1001.2,
+      "p95": 1001.2,
+    },
+  },
+  "supported": true,
+  "totalChaos": 1001.2,
+  "totalDivine": 2.0024,
+  "verdict": {
+    "confidence": "low",
+    "decision": "unknown",
+    "marginChaos": null,
+    "riskAdjusted": false,
+  },
+}
+`;
+
+exports[`method-module parity matrix (zero behaviour change) > slam-protected output is stable 1`] = `
+{
+  "consumables": [
+    {
+      "chaosTotal": 1000,
+      "low": false,
+      "name": "built base (value at risk)",
+      "qty": 1,
+    },
+    {
+      "chaosTotal": 1000,
+      "low": false,
+      "name": "meta: suffixes cannot be changed (Divine Orb)",
+      "qty": 2,
+    },
+    {
+      "chaosTotal": 5,
+      "low": false,
+      "name": "Exalt slam → Increased Life (Exalted Orb)",
+      "qty": 1,
+    },
+  ],
+  "expectedAttempts": 1.5,
+  "lowConfidence": true,
+  "method": "exalt slam (protected: suffixes)",
+  "perAttemptProb": 0.6667,
+  "reason": undefined,
+  "risk": {
+    "bricks": [],
+    "category": "deterministic",
+    "determinism": 1,
+    "dist": {
+      "mean": 2000,
+      "method": "point",
+      "p50": 2000,
+      "p90": 2000,
+      "p95": 2000,
+    },
+  },
+  "supported": true,
+  "totalChaos": 2000,
+  "totalDivine": 4,
+  "verdict": {
+    "confidence": "low",
+    "decision": "unknown",
+    "marginChaos": null,
+    "riskAdjusted": false,
+  },
+}
+`;
+
+exports[`method-module parity matrix (zero behaviour change) > slam-unprotected output is stable 1`] = `
+{
+  "consumables": [
+    {
+      "chaosTotal": 1000,
+      "low": false,
+      "name": "built base (value at risk)",
+      "qty": 1,
+    },
+    {
+      "chaosTotal": 5,
+      "low": false,
+      "name": "Exalt slam → Increased Life (Exalted Orb)",
+      "qty": 1,
+    },
+  ],
+  "expectedAttempts": 1.5,
+  "lowConfidence": true,
+  "method": "exalt slam (unprotected)",
+  "perAttemptProb": 0.6667,
+  "reason": undefined,
+  "risk": {
+    "bricks": [
+      {
+        "failureProb": 0.3333,
+        "label": "Exalt slam → Increased Life",
+        "valueAtRisk": 1005,
+      },
+    ],
+    "category": "high-brick",
+    "determinism": 0.422,
+    "dist": {
+      "mean": 1534.434,
+      "method": "monte-carlo",
+      "p50": 1005,
+      "p90": 3015,
+      "p95": 3015,
+    },
+  },
+  "supported": true,
+  "totalChaos": 1534.434,
+  "totalDivine": 3.0689,
+  "verdict": {
+    "confidence": "low",
+    "decision": "unknown",
+    "marginChaos": null,
+    "riskAdjusted": false,
+  },
+}
+`;
+
+exports[`method-module parity matrix (zero behaviour change) > with-buyside output is stable 1`] = `
+{
+  "consumables": [
+    {
+      "chaosTotal": 0.1875,
+      "low": true,
+      "name": "Orb of Alteration",
+      "qty": 1.875,
+    },
+    {
+      "chaosTotal": 0.2,
+      "low": true,
+      "name": "Regal Orb",
+      "qty": 1,
+    },
+  ],
+  "expectedAttempts": 1.875,
+  "lowConfidence": true,
+  "method": "alt → regal",
+  "perAttemptProb": 0.5333,
+  "reason": undefined,
+  "risk": {
+    "bricks": [],
+    "category": "gamble",
+    "determinism": 0.752,
+    "dist": {
+      "mean": 0.3875,
+      "method": "closed-form",
+      "p50": 0.3,
+      "p90": 0.6,
+      "p95": 0.6,
+    },
+  },
+  "supported": true,
+  "totalChaos": 0.3875,
+  "totalDivine": 0.0008,
+  "verdict": {
+    "confidence": "low",
+    "decision": "craft-likely-cheaper",
+    "marginChaos": null,
+    "riskAdjusted": false,
+  },
+}
+`;

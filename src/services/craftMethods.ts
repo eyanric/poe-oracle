@@ -22,6 +22,10 @@ import {
   type MetaMods,
 } from './craftingModel'
 import { findBenchCraft, type BenchData, type BenchCraft } from './benchCrafting'
+import { newItemState, withAffix, type ItemState } from './itemState'
+import type {
+  CraftModule, CraftModuleRegistry, CraftDataContext, InputSet, ModuleParams, OutcomeDistribution,
+} from './craftModule'
 
 /** One mod the craft is trying to land. Matches by specific id or by group (any tier). */
 export interface DesiredMod {
@@ -325,29 +329,72 @@ function slam(ctx: CraftContext, desired: DesiredMod[], method: Extract<CraftMet
   }
 }
 
-// ── Dispatcher ────────────────────────────────────────────────────────────────
+// ── Method modules + registry (the common interface; see craftModule.ts) ───────
 
-export function expectedAttempts(ctx: CraftContext, desired: DesiredMod[], method: CraftMethod): ExpectedAttemptsResult {
-  switch (method.kind) {
-    case 'essence':
-      return essence(ctx, desired, method)
-    case 'alt-regal':
-      return altRegal(ctx, desired)
-    case 'chaos-spam':
-      return rareReroll(ctx, desired, 'chaos-spam', { name: 'Chaos Orb', qty: 1, category: 'currency' })
-    case 'fossil':
-      return rareReroll(
-        ctx,
-        desired,
-        `fossil (${method.fossilNames.join(' + ')})`,
-        { name: method.fossilNames[0], qty: 1, category: 'currency' },
-        method.fossils,
-      )
-    case 'bench':
-      return bench(ctx, method)
-    case 'multimod':
-      return multimod(ctx, method)
-    case 'slam':
-      return slam(ctx, desired, method)
+/** Rebuild the data-context the per-method math expects from an ItemState + static data. */
+function ctxFromState(state: ItemState, data: CraftDataContext): CraftContext {
+  return { mods: data.mods, baseTags: new Set(state.tags), ilvl: state.ilvl, meta: state.meta, itemClass: state.itemClass, bench: data.bench }
+}
+
+/** Per-use risk steps from an evaluation: its blueprint, or the geometric consumable mapping. */
+function stepsFromResult(r: ExpectedAttemptsResult): PlanStepBlueprint[] {
+  if (r.blueprint) return r.blueprint.steps
+  const out: PlanStepBlueprint[] = []
+  for (const c of r.consumables) {
+    const isKeepTrying = r.perAttemptProb < 1 && Math.abs(c.qty - r.expectedAttempts) <= Math.max(1e-6, r.expectedAttempts * 1e-6)
+    if (isKeepTrying) out.push({ kind: 'keep-trying', label: c.name, p: r.perAttemptProb, consumable: { name: c.name, category: c.category }, qty: 1 })
+    else out.push({ kind: 'fixed', label: c.name, consumable: { name: c.name, category: c.category }, qty: c.qty })
   }
+  return out
+}
+
+/** Generic single-use outcome distribution over item state (hit adds the target affix). */
+function genericSingleOutcomes(state: ItemState, params: ModuleParams, r: ExpectedAttemptsResult): OutcomeDistribution {
+  if (!r.supported) return { outcomes: [{ p: 1, state }], notes: [r.reason ?? 'unsupported'] }
+  const p = Math.min(1, Math.max(0, r.perAttemptProb))
+  const t = params.desired[0]
+  const hit = t ? withAffix(state, { modId: t.modId ?? t.group ?? t.label, group: t.group ?? t.modId ?? t.label, slot: t.slot }) : state
+  return p >= 1 ? { outcomes: [{ p: 1, state: hit }] } : { outcomes: [{ p, state: hit }, { p: 1 - p, state }] }
+}
+
+/** Build a single-item (arity-1) module wrapping a per-method evaluation. */
+function singleItemModule(id: string, title: string, core: (ctx: CraftContext, desired: DesiredMod[], method: CraftMethod) => ExpectedAttemptsResult): CraftModule {
+  const evaluate = (inputs: InputSet, data: CraftDataContext, params: ModuleParams): ExpectedAttemptsResult =>
+    core(ctxFromState(inputs[0], data), params.desired, params.method)
+  return {
+    id, title, arity: 1, evaluate,
+    applicable: (inputs, data, params) => { const r = evaluate(inputs, data, params); return { ok: r.supported, reason: r.reason } },
+    outcomes: (inputs, data, params) => genericSingleOutcomes(inputs[0], params, evaluate(inputs, data, params)),
+    cost: (inputs, data, params) => { const r = evaluate(inputs, data, params); return { steps: stepsFromResult(r), lowConfidence: r.lowConfidence, manualPriceHooks: [] } },
+    toRiskSteps: (inputs, data, params) => stepsFromResult(evaluate(inputs, data, params)),
+  }
+}
+
+export const CRAFT_MODULES: CraftModuleRegistry = {
+  essence: singleItemModule('essence', 'Essence (forced mod)', (ctx, desired, m) => essence(ctx, desired, m as Extract<CraftMethod, { kind: 'essence' }>)),
+  'alt-regal': singleItemModule('alt-regal', 'Alt → Regal', (ctx, desired) => altRegal(ctx, desired)),
+  'chaos-spam': singleItemModule('chaos-spam', 'Chaos spam', (ctx, desired) => rareReroll(ctx, desired, 'chaos-spam', { name: 'Chaos Orb', qty: 1, category: 'currency' })),
+  fossil: singleItemModule('fossil', 'Fossil', (ctx, desired, m) => {
+    const f = m as Extract<CraftMethod, { kind: 'fossil' }>
+    return rareReroll(ctx, desired, `fossil (${f.fossilNames.join(' + ')})`, { name: f.fossilNames[0], qty: 1, category: 'currency' }, f.fossils)
+  }),
+  bench: singleItemModule('bench', 'Bench craft', (ctx, _desired, m) => bench(ctx, m as Extract<CraftMethod, { kind: 'bench' }>)),
+  multimod: singleItemModule('multimod', 'Multimod', (ctx, _desired, m) => multimod(ctx, m as Extract<CraftMethod, { kind: 'multimod' }>)),
+  slam: singleItemModule('slam', 'Exalt slam', (ctx, desired, m) => slam(ctx, desired, m as Extract<CraftMethod, { kind: 'slam' }>)),
+}
+
+/** Evaluate a method through its module (the interface entry point for craftCost). */
+export function evaluateMethod(state: ItemState, data: CraftDataContext, params: ModuleParams): ExpectedAttemptsResult {
+  const mod = CRAFT_MODULES[params.method.kind]
+  if (!mod) return unsupported(params.method.kind, `no module registered for method "${params.method.kind}"`)
+  return mod.evaluate([state], data, params)
+}
+
+/**
+ * Back-compat entry: evaluate a method from a CraftContext. Builds the item state and
+ * dispatches through the module registry (kept so existing callers/tests are unchanged).
+ */
+export function expectedAttempts(ctx: CraftContext, desired: DesiredMod[], method: CraftMethod): ExpectedAttemptsResult {
+  const state = newItemState({ base: '', itemClass: ctx.itemClass ?? '', ilvl: ctx.ilvl, tags: [...ctx.baseTags], meta: ctx.meta ?? {} })
+  return evaluateMethod(state, { mods: ctx.mods, bench: ctx.bench }, { desired, method })
 }

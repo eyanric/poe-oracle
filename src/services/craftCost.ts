@@ -21,7 +21,8 @@ import { searchEconomy } from './economySearch'
 import type { EconomySnapshot } from './economyTypes'
 import { getEconomyProvider } from './EconomyProvider'
 import { resolveCurrentLeague } from './LeagueResolver'
-import { expectedAttempts, type CraftContext, type CraftMethod, type DesiredMod, type PlanBlueprint } from './craftMethods'
+import { evaluateMethod, type CraftMethod, type DesiredMod, type PlanBlueprint } from './craftMethods'
+import { newItemState } from './itemState'
 import { buildSlotPool, type MetaMods } from './craftingModel'
 import { computePseudoTotals } from './pseudoMods'
 import { estimateRarePriceLive, type RareItemSpec } from './rarePricing'
@@ -202,8 +203,9 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
   const { method, desired, error } = resolveMethod(spec, base, deps)
   if (error) return unsupportedShell(error)
 
-  const ctx: CraftContext = { mods: deps.mods, baseTags: new Set(base.tags), ilvl: spec.ilvl, meta: spec.meta, itemClass: base.item_class, bench: deps.bench }
-  const ev = expectedAttempts(ctx, desired, method)
+  // Compose through the method-module interface: build the item state, evaluate the module.
+  const state = newItemState({ base: base.name, itemClass: base.item_class, ilvl: spec.ilvl, tags: base.tags, meta: spec.meta ?? {} })
+  const ev = evaluateMethod(state, { mods: deps.mods, bench: deps.bench }, { desired, method })
   notes.push(...ev.notes)
 
   if (!ev.supported) {
