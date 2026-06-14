@@ -5,6 +5,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { registerEconomyTools } from './tools/economy'
 import { registerAppraiseTool, registerPriceCheckItemTool, registerWatchTool } from './tools/appraise'
+import { registerCraftCostTool } from './tools/craft'
 import { registerOptionalTools } from './optional/index'
 
 export const SERVER_NAME = 'poe-oracle'
@@ -19,6 +20,7 @@ export function createPoeMcpServer(): McpServer {
   registerAppraiseTool(server)
   registerPriceCheckItemTool(server)
   registerWatchTool(server)
+  registerCraftCostTool(server)
 
   // OPTIONAL — gated (currently a stub; registers nothing).
   registerOptionalTools(server)
