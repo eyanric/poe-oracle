@@ -21,7 +21,7 @@ import { log } from './log'
 
 const USER_AGENT =
   process.env.POE_MCP_USER_AGENT ??
-  'Mozilla/5.0 (compatible; poe-mcp/0.2; +https://github.com/eyanric/vaal)'
+  'Mozilla/5.0 (compatible; poe-oracle/0.2; +https://github.com/eyanric/poe-oracle)'
 
 const CACHE_TTL_MS = 10 * 60_000
 

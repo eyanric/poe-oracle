@@ -9,7 +9,7 @@
  * `fetchImpl` is injectable so the cache/guard logic is unit-testable without network.
  */
 const DEFAULT_TTL_MS = 60 * 60_000 // 1 hour — static exports only change on patches
-const USER_AGENT = process.env.POE_MCP_USER_AGENT ?? 'poe-copilot (read-only; +https://github.com/eyanric/poe-copilot)'
+const USER_AGENT = process.env.POE_MCP_USER_AGENT ?? 'poe-oracle (read-only; +https://github.com/eyanric/poe-oracle)'
 
 export interface FetchJsonOptions {
   /** Cache TTL in ms (default 1h). A value ≤ 0 disables caching (always re-fetches). */

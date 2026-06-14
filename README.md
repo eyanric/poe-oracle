@@ -1,4 +1,4 @@
-# poe-copilot
+# poe-oracle
 
 A **read-only, ToS-clean Path of Exile 1 AI copilot** — an MCP server giving an AI assistant
 (Claude Desktop / Claude Code) a live information & analysis edge for the **economy** and **build
@@ -55,7 +55,7 @@ Manual live smoke tests: `node acceptance.mjs`, `node appraise-acceptance.mjs`, 
 ```json
 {
   "mcpServers": {
-    "poe": { "command": "node", "args": ["<abs-path>/poe-copilot/dist/index.js"] }
+    "poe": { "command": "node", "args": ["<abs-path>/poe-oracle/dist/index.js"] }
   }
 }
 ```

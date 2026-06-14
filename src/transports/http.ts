@@ -72,5 +72,5 @@ export async function startHttp(host: string, port: number): Promise<void> {
   })
 
   await new Promise<void>(resolve => httpServer.listen(port, host, resolve))
-  log.info(`[poe-mcp] listening on streamable-http at http://${host}:${port}/mcp`)
+  log.info(`[poe-oracle] listening on streamable-http at http://${host}:${port}/mcp`)
 }

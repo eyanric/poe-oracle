@@ -23,7 +23,7 @@ import { buildTradeQuery, indexStats, type StatIndex } from './tradeQuery'
 const HOST = 'https://www.pathofexile.com'
 const USER_AGENT =
   process.env.POE_MCP_USER_AGENT ??
-  'poe-mcp/0.3 (appraise; +https://github.com/eyanric/vaal)'
+  'poe-oracle/0.3 (appraise; +https://github.com/eyanric/poe-oracle)'
 
 /** One sampled live listing: price in chaos + age in seconds. */
 export interface LiveListing {

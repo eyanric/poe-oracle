@@ -43,7 +43,7 @@ const VERSION = '0' // latest snapshot
 const SOURCE = 'poe.ninja'
 const USER_AGENT =
   process.env.POE_MCP_USER_AGENT ??
-  'Mozilla/5.0 (compatible; poe-mcp/0.2; +https://github.com/eyanric/vaal)'
+  'Mozilla/5.0 (compatible; poe-oracle/0.2; +https://github.com/eyanric/poe-oracle)'
 const CACHE_TTL = 10 * 60_000
 
 /** EconomySnapshot field ← poe.ninja item-overview `type`. Types absent for a league 404 → []. */

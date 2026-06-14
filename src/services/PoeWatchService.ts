@@ -25,7 +25,7 @@ const SOURCE = 'poe.watch'
 const BASE = 'https://api.poe.watch'
 const USER_AGENT =
   process.env.POE_MCP_USER_AGENT ??
-  'poe-mcp/0.1.0 (+https://github.com/eyanric/vaal; consolidated PoE data MCP)'
+  'poe-oracle/0.1.0 (+https://github.com/eyanric/poe-oracle; consolidated PoE data MCP)'
 const CACHE_TTL = 10 * 60_000
 
 /** One row from poe.watch `/get?category=…&league=…`. */

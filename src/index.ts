@@ -15,6 +15,6 @@ async function main(): Promise<void> {
 }
 
 main().catch(err => {
-  log.error('[poe-mcp] fatal:', err)
+  log.error('[poe-oracle] fatal:', err)
   process.exit(1)
 })

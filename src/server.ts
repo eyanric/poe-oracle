@@ -7,7 +7,7 @@ import { registerEconomyTools } from './tools/economy'
 import { registerAppraiseTool, registerPriceCheckItemTool, registerWatchTool } from './tools/appraise'
 import { registerOptionalTools } from './optional/index'
 
-export const SERVER_NAME = 'poe-mcp'
+export const SERVER_NAME = 'poe-oracle'
 export const SERVER_VERSION = '0.1.0'
 
 /** Create a fully-wired server instance (used by every transport). */
