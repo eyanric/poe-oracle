@@ -37,12 +37,15 @@ import type {
   CraftModule, CraftModuleRegistry, CraftDataContext, InputSet, ModuleParams, OutcomeDistribution,
 } from './craftModule'
 
-/** One mod the craft is trying to land. Matches by specific id or by group (any tier). */
+/** One mod the craft is trying to land. Matches by specific id, or by group; an optional `minTier`
+ *  widens it to "this group at tier ≥ floor" (tier 1 = best; a `minTier` of 2 accepts T1 or T2). */
 export interface DesiredMod {
   slot: Slot
   group?: string
   modId?: string
   label: string
+  /** Tier floor (1 = best). Absent ⇒ exact (modId/group). Present ⇒ group at tier ≤ minTier. */
+  minTier?: number
 }
 
 export interface CraftContext {
@@ -146,8 +149,29 @@ export interface ExpectedAttemptsResult {
   notes: string[]
 }
 
-const matcher = (d: DesiredMod) => (e: ModEntry): boolean =>
-  d.modId ? e.id === d.modId : d.group ? e.group === d.group : false
+/** Dense tier rank (1 = highest required_level = best) per modId within a group — matches modWeightIndex. */
+function tierRank(pool: ModEntry[], group: string): Map<string, number> {
+  const inGroup = pool.filter(e => e.group === group)
+  const levels = [...new Set(inGroup.map(e => e.mod.required_level))].sort((a, b) => b - a)
+  const map = new Map<string, number>()
+  for (const e of inGroup) map.set(e.id, levels.indexOf(e.mod.required_level) + 1)
+  return map
+}
+
+/**
+ * Predicate for "does this pool entry satisfy the desired mod". Exact (no `minTier`) ⇒ modId/group as
+ * before (parity-preserving). With `minTier` ⇒ the mod's group at tier ≤ floor (tier 1 = best).
+ */
+const matcher = (d: DesiredMod, pool: ModEntry[] = []) => {
+  const group = d.group ?? (d.modId ? pool.find(e => e.id === d.modId)?.group : undefined)
+  if (d.minTier != null && group) {
+    const rank = tierRank(pool, group)
+    return (e: ModEntry): boolean => e.group === group && (rank.get(e.id) ?? Infinity) <= d.minTier!
+  }
+  if (d.modId) return (e: ModEntry): boolean => e.id === d.modId
+  if (d.group) return (e: ModEntry): boolean => e.group === d.group
+  return (): boolean => false
+}
 
 function unsupported(method: string, reason: string): ExpectedAttemptsResult {
   return { method, supported: false, reason, expectedAttempts: Infinity, perAttemptProb: 0, consumables: [], lowConfidence: true, notes: [] }
@@ -211,9 +235,9 @@ function altRegal(ctx: CraftContext, desired: DesiredMod[]): ExpectedAttemptsRes
   const pSlot = (s: Slot) => (s === 'prefix' ? occ.pPrefix : occ.pSuffix)
 
   // P that a single desired mod lands in its slot on one alt'd magic item.
-  const pOne = (d: DesiredMod): number => pSlot(d.slot) * slotShare(poolFor(d.slot), matcher(d))
+  const pOne = (d: DesiredMod): number => pSlot(d.slot) * slotShare(poolFor(d.slot), matcher(d, poolFor(d.slot)))
 
-  if (desired.some(d => slotShare(poolFor(d.slot), matcher(d)) <= 0)) {
+  if (desired.some(d => slotShare(poolFor(d.slot), matcher(d, poolFor(d.slot))) <= 0)) {
     return unsupported(method, `a desired mod cannot roll on this base/ilvl (weight 0): ${desired.map(d => d.label).join(', ')}`)
   }
 
@@ -223,7 +247,7 @@ function altRegal(ctx: CraftContext, desired: DesiredMod[]): ExpectedAttemptsRes
     pHit = pOne(desired[0])
     notes.push(
       `P(${desired[0].label}) per alt = P(${desired[0].slot} present ${(pSlot(desired[0].slot) * 100).toFixed(0)}%) × ` +
-        `share-of-${desired[0].slot} ${(slotShare(poolFor(desired[0].slot), matcher(desired[0])) * 100).toFixed(1)}%.`,
+        `share-of-${desired[0].slot} ${(slotShare(poolFor(desired[0].slot), matcher(desired[0], poolFor(desired[0].slot))) * 100).toFixed(1)}%.`,
     )
   } else {
     if (desired[0].slot === desired[1].slot) {
@@ -233,10 +257,10 @@ function altRegal(ctx: CraftContext, desired: DesiredMod[]): ExpectedAttemptsRes
     const pre = desired.find(d => d.slot === 'prefix')!
     const suf = desired.find(d => d.slot === 'suffix')!
     const pTwoAffix = occ.pPrefix + occ.pSuffix - 1 // = P(both slots filled) = P(2-affix)
-    pHit = pTwoAffix * slotShare(prefixPool, matcher(pre)) * slotShare(suffixPool, matcher(suf))
+    pHit = pTwoAffix * slotShare(prefixPool, matcher(pre, prefixPool)) * slotShare(suffixPool, matcher(suf, suffixPool))
     notes.push(
       `Two-mod alt→regal: P(both) per alt = P(2-affix ${(pTwoAffix * 100).toFixed(0)}%) × ` +
-        `share-prefix ${(slotShare(prefixPool, matcher(pre)) * 100).toFixed(1)}% × share-suffix ${(slotShare(suffixPool, matcher(suf)) * 100).toFixed(1)}%. ` +
+        `share-prefix ${(slotShare(prefixPool, matcher(pre, prefixPool)) * 100).toFixed(1)}% × share-suffix ${(slotShare(suffixPool, matcher(suf, suffixPool)) * 100).toFixed(1)}%. ` +
         `Models "alt until both present, then regal" (a conservative upper bound vs alt-then-augment).`,
     )
   }
@@ -278,7 +302,7 @@ function rareReroll(
   const pTotal = totalWeight(prefixPool)
   const sTotal = totalWeight(suffixPool)
   const pool = d.slot === 'prefix' ? prefixPool : suffixPool
-  const share = slotShare(pool, matcher(d))
+  const share = slotShare(pool, matcher(d, pool))
   if (share <= 0) return unsupported(method, `${d.label} cannot roll on this base/ilvl under these fossils (weight 0)`)
 
   const slots = expectedRareSlots(pTotal, sTotal, d.slot)
@@ -355,7 +379,7 @@ function slam(ctx: CraftContext, desired: DesiredMod[], method: Extract<CraftMet
   if (desired.length === 0) return unsupported('slam', 'no target mod for the open slot')
   const d = desired[0]
   const pool = buildSlotPool(ctx.mods, ctx.baseTags, ctx.ilvl, d.slot, { meta: ctx.meta })
-  const pSuccess = slotShare(pool, matcher(d))
+  const pSuccess = slotShare(pool, matcher(d, pool))
   if (pSuccess <= 0) return unsupported('slam', `${d.label} cannot roll in the open ${d.slot} slot (weight 0)`)
 
   const recoverable = !!method.protect

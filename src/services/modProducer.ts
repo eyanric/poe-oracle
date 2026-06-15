@@ -97,6 +97,8 @@ export interface TargetCandidate {
   slot: Slot // explicit/veiled/influence: the affix; eldritch: side (exarch=prefix, eater=suffix)
   domain: ModDomain
   influence?: Influence
+  /** Tier (1 = best). Doubles as the floor HANDLE: a caller passes this as a target's `minTier`
+   *  to widen "exact this tier" → "this group at tier-or-better" (the good-enough UI control). */
   tier?: number
   weight: number
 }

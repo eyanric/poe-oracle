@@ -31,8 +31,9 @@ import { modProducers, classifyMod } from './modProducer'
 import { respectsLock, blockedOnLockedItem } from './lockMatrix'
 import type { RiskCategory } from './craftRisk'
 
-/** A specific named mod — the shape the UI per-mod picker emits. No abstract "any T1". */
-export interface SpecificMod { slot: Slot; group?: string; modId?: string; label: string }
+/** A specific named mod — the shape the UI per-mod picker emits. No abstract "any T1".
+ *  `minTier` (opt-in) widens it to "this group at tier ≥ floor" (1 = best); absent ⇒ exact. */
+export interface SpecificMod { slot: Slot; group?: string; modId?: string; label: string; minTier?: number }
 export interface TargetSpec {
   base: string
   ilvl: number
@@ -338,8 +339,12 @@ const respectsLocksOf = (methodKind: string): boolean => respectsLock(methodKind
 const minConf = (a: PathConfidence, b: PathConfidence): PathConfidence =>
   a === 'low' || b === 'low' ? 'low' : a === 'medium' || b === 'medium' ? 'medium' : 'high'
 const modPresent = (s: ItemState, d: SpecificMod): boolean =>
-  s.affixes.some(a => a.slot === d.slot && (d.modId ? a.modId === d.modId : d.group ? a.group === d.group : false))
-const affixOf = (d: SpecificMod) => ({ slot: d.slot, group: d.group ?? d.modId ?? d.label, modId: d.modId ?? d.group ?? d.label })
+  s.affixes.some(a => {
+    if (a.slot !== d.slot) return false
+    if (d.minTier != null && d.group) return a.group === d.group && (a.tier ?? Infinity) <= d.minTier // floored: group at tier ≤ floor
+    return d.modId ? a.modId === d.modId : d.group ? a.group === d.group : false
+  })
+const affixOf = (d: SpecificMod) => ({ slot: d.slot, group: d.group ?? d.modId ?? d.label, modId: d.modId ?? d.group ?? d.label, tier: d.minTier })
 const asRare = (s: ItemState): ItemState => (s.rarity === 'rare' ? s : { ...s, rarity: 'rare', caps: { ...RARITY_CAPS.rare } })
 const priceOf = (deps: CraftDeps, name: string): number | null => { const m = searchEconomy(deps.snapshot, name, 'currency', 1)[0]; return m && m.chaosValue > 0 ? m.chaosValue : null }
 

@@ -98,22 +98,26 @@ export interface ModTarget {
   modId?: string
   /** A mod group (the named mod family, any tier). */
   group?: string
+  /** Tier floor (1 = best). Present ⇒ "group at tier ≤ minTier"; the modId only identifies the group. */
+  minTier?: number
 }
 
 /** Is a target specific enough to cost? (named by modId or group — not "any prefix".) */
 export const isSpecificTarget = (t: { modId?: string; group?: string }): boolean => !!(t.modId || t.group)
 
 /**
- * P(rolling the specific target mod) on this base = resolvedWeight(target) / same-affix
- * pool total. `modId` → that exact tier; `group` → the family (sum of its tiers). Returns
- * 0 for an abstract target (caller should reject those — see `isSpecificTarget`).
+ * P(rolling the target mod) on this base = resolvedWeight(target) / same-affix pool total. `modId` →
+ * that exact tier; `group` → the family (sum of its tiers); `minTier` → the group's qualifying tiers
+ * (tier ≤ floor), i.e. P(tier-or-better). Returns 0 for an abstract target (caller rejects those).
  */
 export function modRollProbability(index: BaseModIndex, target: ModTarget): number {
   const pool = target.affix === 'prefix' ? index.prefixes : index.suffixes
   const total = target.affix === 'prefix' ? index.prefixTotal : index.suffixTotal
   if (total <= 0) return 0
+  const group = target.group ?? (target.modId ? pool.find(e => e.modId === target.modId)?.group : undefined)
   let weight = 0
-  if (target.modId) weight = pool.find(e => e.modId === target.modId)?.weight ?? 0
+  if (target.minTier != null && group) weight = pool.filter(e => e.group === group && e.tier <= target.minTier!).reduce((s, e) => s + e.weight, 0)
+  else if (target.modId) weight = pool.find(e => e.modId === target.modId)?.weight ?? 0
   else if (target.group) weight = pool.filter(e => e.group === target.group).reduce((s, e) => s + e.weight, 0)
   return weight / total
 }
