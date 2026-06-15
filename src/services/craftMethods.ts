@@ -29,6 +29,7 @@ import { eldritchImplicitModule, eldritchExaltModule, eldritchAnnulModule, type 
 import { addInfluenceModule, awakenersModule, orbOfDominanceModule, type Influence } from './influence'
 import { catalystModule, type Catalyst } from './catalysts'
 import { anointModule } from './anoint'
+import { veiledChaosModule, veiledExaltModule } from './veiled'
 import { isLeagueActive } from './craftModule'
 import type {
   CraftModule, CraftModuleRegistry, CraftDataContext, InputSet, ModuleParams, OutcomeDistribution,
@@ -79,6 +80,9 @@ export type CraftMethod =
   | { kind: 'catalyst'; catalyst: Catalyst; quality?: number; catalystCount?: number }
   /** Anoint an amulet: a named notable (seed recipe) or explicit 3 oils → deterministic enchant. */
   | { kind: 'anoint'; notable?: string; oils?: string[] }
+  /** Veiled mod via Veiled Chaos (reroll, destructive) or Veiled Exalt (clean add to open slot). */
+  | { kind: 'veiled-chaos' }
+  | { kind: 'veiled-exalt' }
 
 /**
  * An UNPRICED craft plan the risk engine runs once `craftCost` prices each step's
@@ -428,6 +432,8 @@ export const CRAFT_MODULES: CraftModuleRegistry = {
   'orb-of-dominance': orbOfDominanceModule,
   catalyst: catalystModule,
   anoint: anointModule,
+  'veiled-chaos': veiledChaosModule,
+  'veiled-exalt': veiledExaltModule,
 }
 
 /**

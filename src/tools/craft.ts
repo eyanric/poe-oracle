@@ -36,7 +36,7 @@ export function registerCraftCostTool(server: McpServer): void {
             }),
           )
           .describe('Target mods to land. essence auto-targets its forced mod, so it may be empty there.'),
-        method: z.enum(['essence', 'alt-regal', 'chaos-spam', 'fossil', 'bench', 'multimod', 'slam', 'harvest', 'eldritch-implicit', 'eldritch-exalt', 'eldritch-annul', 'add-influence', 'orb-of-dominance', 'catalyst', 'anoint']).describe('Crafting method.'),
+        method: z.enum(['essence', 'alt-regal', 'chaos-spam', 'fossil', 'bench', 'multimod', 'slam', 'harvest', 'eldritch-implicit', 'eldritch-exalt', 'eldritch-annul', 'add-influence', 'orb-of-dominance', 'catalyst', 'anoint', 'veiled-chaos', 'veiled-exalt']).describe('Crafting method.'),
         essenceName: z.string().optional().describe('Required for method=essence, e.g. "Deafening Essence of Greed".'),
         fossilNames: z.array(z.string()).optional().describe('Required for method=fossil, e.g. ["Pristine Fossil"].'),
         benchMods: z.array(z.string()).optional().describe('Required for method=bench/multimod: bench-craft search terms, e.g. ["maximum Life", "Fire Resistance"].'),
@@ -177,6 +177,8 @@ function toMethodSpec(
     if (!o.notable && !(o.oils && o.oils.length)) return { error: 'method=anoint requires notable or oils (3)' }
     return { kind: 'anoint', notable: o.notable, oils: o.oils }
   }
+  if (method === 'veiled-chaos') return { kind: 'veiled-chaos' }
+  if (method === 'veiled-exalt') return { kind: 'veiled-exalt' }
   if (method === 'add-influence') {
     if (!o.addInfluence) return { error: 'method=add-influence requires addInfluence (shaper|elder|crusader|redeemer|hunter|warlord)' }
     return { kind: 'add-influence', influence: o.addInfluence }
