@@ -4,15 +4,19 @@
  * Normalizes RePoE's `crafting_bench_options` into deterministic bench crafts and the
  * meta-mods (multimod, prefixes/suffixes-cannot-be-changed, cannot-roll-attack/caster).
  *
- * ⚠ COST CONFIDENCE: the RePoE export's bench/meta costs read as PRE-3.28 (multimod &
- * "cannot be changed" = 2 Divine, "cannot roll" = 1 Divine, bench mods in alt/chaos/alch
- * amounts) — they do NOT reflect the 3.28 Mirage "bench costs standardized to ~4 Exalted"
- * rework. So every bench/meta cost is treated as LOW-CONFIDENCE and flagged. Structure
- * (which mod, slot, item-class, currency kind) is reliable; the AMOUNTS are stale.
+ * ⚠ COST CONFIDENCE (see docs/reports/bench-cost-fix.md): the cost is PRESENT and priced
+ * LIVE — each option's `cost` dict is a currency-metadata-path → amount, mapped here to an
+ * economy currency name + count, and `craftCost` prices it as amount × live currency chaos.
+ * The verifiable subset (meta: multimod/lock 2 Divine, cannot-roll 1 Divine) matches current
+ * in-game values; per-mod bench amounts are taken from the export as-is and are NOT
+ * independently re-verified against the current patch, so every bench/meta cost is treated
+ * as LOW-CONFIDENCE. Verified corrections go in `data/benchCostOverrides` (keyed by mod id),
+ * preferred here when present; empty ⇒ export amount unchanged.
  *
  * Pure over data; pricing happens in `craftCost`.
  */
 import type { RepoeBenchOption, RepoeMod } from '../data/repoe'
+import { BENCH_COST_OVERRIDES, type BenchCostOverride } from '../data/benchCostOverrides'
 
 /** Currency metadata path → economy name (for live pricing). */
 export const BENCH_CURRENCY_NAMES: Record<string, string> = {
@@ -60,8 +64,13 @@ export interface BenchData {
   meta: Partial<Record<MetaKind, BenchCraft>>
 }
 
-/** Normalize bench options → bench crafts + meta-mods, joining each to its RePoE mod. */
-export function normalizeBench(options: RepoeBenchOption[], mods: Record<string, RepoeMod>): BenchData {
+/** Normalize bench options → bench crafts + meta-mods, joining each to its RePoE mod.
+ *  `overrides` (verified per-recipe costs, keyed by mod id) take precedence over the export. */
+export function normalizeBench(
+  options: RepoeBenchOption[],
+  mods: Record<string, RepoeMod>,
+  overrides: Record<string, BenchCostOverride> = BENCH_COST_OVERRIDES,
+): BenchData {
   const crafts: BenchCraft[] = []
   for (const o of options) {
     const modId = o.actions?.add_explicit_mod
@@ -69,7 +78,9 @@ export function normalizeBench(options: RepoeBenchOption[], mods: Record<string,
     const mod = mods[modId]
     const [path, amount] = Object.entries(o.cost ?? {})[0] ?? []
     if (!path || amount == null) continue
-    const costName = BENCH_CURRENCY_NAMES[path.split('/').pop() ?? ''] ?? path.split('/').pop() ?? path
+    const override = overrides[modId]
+    const costName = override?.costName ?? BENCH_CURRENCY_NAMES[path.split('/').pop() ?? ''] ?? path.split('/').pop() ?? path
+    const costAmount = override?.costAmount ?? amount
     const meta = metaKindOf(modId)
     const slot: 'prefix' | 'suffix' =
       mod?.generation_type === 'prefix' ? 'prefix' : mod?.generation_type === 'suffix' ? 'suffix' : 'prefix'
@@ -79,7 +90,7 @@ export function normalizeBench(options: RepoeBenchOption[], mods: Record<string,
       label: mod?.text || mod?.name || modId,
       itemClasses: o.item_classes ?? [],
       costName,
-      costAmount: amount,
+      costAmount,
       tier: o.bench_tier,
       meta,
     })

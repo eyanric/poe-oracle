@@ -26,6 +26,7 @@
     "validate:ev": "tsx scripts/ev-sanity.mjs",
     "validate:craft": "tsx scripts/validate-craft.mjs",
     "validate:bench": "tsx scripts/validate-bench-meta.mjs",
+    "validate:bench-cost": "tsx scripts/validate-bench-cost.mjs",
     "validate:harvest": "tsx scripts/validate-harvest.mjs",
     "validate:recombine": "tsx scripts/validate-recombine.mjs",
     "validate:eldritch": "tsx scripts/validate-eldritch.mjs",

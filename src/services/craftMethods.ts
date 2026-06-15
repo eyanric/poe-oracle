@@ -326,8 +326,9 @@ function rareReroll(
 // ── Methods: bench / multimod / slam (deterministic + meta-protected gambles) ──
 
 const STALE_COST_NOTE =
-  '⚠ bench/meta COSTS are low-confidence — RePoE export amounts read as pre-3.28 (multimod 2 div, ' +
-  'bench in alt/chaos), not the 3.28 "standardized ~4 Exalted" rework. Structure is reliable; amounts may be stale.'
+  '⚠ bench/meta COSTS are low-confidence — amounts come from the RePoE export and are priced LIVE ' +
+  '(currency × count). Meta (multimod/lock 2 Divine, cannot-roll 1 Divine) matches current values; ' +
+  'per-mod bench amounts are not independently re-verified — verified corrections go in benchCostOverrides.'
 
 function resolveBenchMods(ctx: CraftContext, terms: string[]): { found: BenchCraft[]; missing: string[] } {
   const found: BenchCraft[] = []
