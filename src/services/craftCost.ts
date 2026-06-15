@@ -49,6 +49,8 @@ export type MethodSpec =
   | { kind: 'anoint'; notable?: string; oils?: string[] }
   | { kind: 'veiled-chaos' }
   | { kind: 'veiled-exalt' }
+  | { kind: 'synthesise' }
+  | { kind: 'synthesis-reroll'; poolSize?: number }
 
 export interface CraftSpec {
   baseName: string
@@ -167,7 +169,8 @@ function resolveMethod(
     m.kind === 'slam' || m.kind === 'harvest' ||
     m.kind === 'eldritch-implicit' || m.kind === 'eldritch-exalt' || m.kind === 'eldritch-annul' ||
     m.kind === 'add-influence' || m.kind === 'orb-of-dominance' || m.kind === 'catalyst' || m.kind === 'anoint' ||
-    m.kind === 'veiled-chaos' || m.kind === 'veiled-exalt'
+    m.kind === 'veiled-chaos' || m.kind === 'veiled-exalt' ||
+    m.kind === 'synthesise' || m.kind === 'synthesis-reroll'
   ) {
     return { method: m, desired: spec.desired }
   }

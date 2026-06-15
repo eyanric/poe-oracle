@@ -30,6 +30,7 @@ import { addInfluenceModule, awakenersModule, orbOfDominanceModule, type Influen
 import { catalystModule, type Catalyst } from './catalysts'
 import { anointModule } from './anoint'
 import { veiledChaosModule, veiledExaltModule } from './veiled'
+import { synthesiseModule, synthesisRerollModule } from './synthesis'
 import { isLeagueActive } from './craftModule'
 import type {
   CraftModule, CraftModuleRegistry, CraftDataContext, InputSet, ModuleParams, OutcomeDistribution,
@@ -83,6 +84,10 @@ export type CraftMethod =
   /** Veiled mod via Veiled Chaos (reroll, destructive) or Veiled Exalt (clean add to open slot). */
   | { kind: 'veiled-chaos' }
   | { kind: 'veiled-exalt' }
+  /** Harvest synthesise transform (→ synthesised base + random implicits). */
+  | { kind: 'synthesise' }
+  /** Beast (Vivid Vulture) reroll of a synthesis implicit — keep-trying (pool size flagged). */
+  | { kind: 'synthesis-reroll'; poolSize?: number }
 
 /**
  * An UNPRICED craft plan the risk engine runs once `craftCost` prices each step's
@@ -434,6 +439,8 @@ export const CRAFT_MODULES: CraftModuleRegistry = {
   anoint: anointModule,
   'veiled-chaos': veiledChaosModule,
   'veiled-exalt': veiledExaltModule,
+  synthesise: synthesiseModule,
+  'synthesis-reroll': synthesisRerollModule,
 }
 
 /**
