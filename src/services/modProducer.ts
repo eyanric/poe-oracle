@@ -20,7 +20,7 @@
 import type { RepoeBaseItem, RepoeMod } from '../data/repoe'
 import type { MethodSpec } from './craftCost'
 import type { Slot } from './itemState'
-import { buildInfluenceIndex, INFLUENCES } from './influence'
+import { buildInfluenceIndex, INFLUENCES, type Influence } from './influence'
 import { buildEldritchIndex, ELDRITCH_BASE_TAGS } from './eldritch'
 import { buildVeiledPool } from './veiled'
 import { resolveBaseModIndex, modRollProbability } from './modWeightIndex'
@@ -83,4 +83,58 @@ export function classifyMod(mod: ProducerMod, base: RepoeBaseItem, ilvl: number,
 /** The specialized method specs that can produce a desired mod (empty for core/unclassifiable). */
 export function modProducers(mod: ProducerMod, base: RepoeBaseItem, ilvl: number, mods: Record<string, RepoeMod>): MethodSpec[] {
   return classifyMod(mod, base, ilvl, mods).specs
+}
+
+// ── stat/group → candidate modIds (the disambiguation contract for the UI picker) ──
+
+export type ModDomain = 'explicit' | 'eldritch-implicit' | 'veiled' | 'influence'
+/** A concrete mod IDENTITY for a stat/group on a base — a distinct (modId, domain, tier). */
+export interface TargetCandidate {
+  modId: string
+  group: string
+  /** The mod's roll text (tier-specific) — the display + tier-exact pricing label. */
+  label: string
+  slot: Slot // explicit/veiled/influence: the affix; eldritch: side (exarch=prefix, eater=suffix)
+  domain: ModDomain
+  influence?: Influence
+  tier?: number
+  weight: number
+}
+
+const textHit = (e: { group: string; text?: string }, q: string): boolean =>
+  e.group.toLowerCase() === q || (e.text ?? '').toLowerCase().includes(q)
+
+/**
+ * Resolve a human stat/group query to the candidate mod IDENTITIES on a base — the **modIds** across
+ * tiers AND domains (explicit / eldritch-implicit / veiled / influence). An AMBIGUOUS stat (e.g. one
+ * that exists as both an eldritch implicit and a normal explicit, or several tiers) returns MULTIPLE
+ * candidates for the picker to disambiguate; an unambiguous one returns a single modId. Targeting the
+ * returned modId (not the stat) is what removes the cross-domain conflation the 3a flag described.
+ */
+export function resolveTargets(query: string, base: RepoeBaseItem, ilvl: number, mods: Record<string, RepoeMod>): TargetCandidate[] {
+  const q = query.toLowerCase()
+  const tags = new Set(base.tags)
+  const out: TargetCandidate[] = []
+  const seen = new Set<string>()
+  const add = (c: TargetCandidate): void => { const k = `${c.modId}|${c.domain}`; if (!seen.has(k)) { seen.add(k); out.push(c) } }
+
+  // explicit prefixes/suffixes
+  const idx = resolveBaseModIndex(base, mods, ilvl)
+  for (const e of [...idx.prefixes, ...idx.suffixes]) if (textHit(e, q)) add({ modId: e.modId, group: e.group, label: e.text ?? e.group, slot: e.affix, domain: 'explicit', tier: e.tier, weight: e.weight })
+  // eldritch implicits (eligible bases)
+  if (ELDRITCH_BASE_TAGS.some(t => base.tags.includes(t))) {
+    for (const side of ['exarch', 'eater'] as const) {
+      for (const e of buildEldritchIndex(tags, side, mods).entries) if (textHit(e, q)) add({ modId: e.modId, group: e.group, label: e.text ?? e.group, slot: side === 'eater' ? 'suffix' : 'prefix', domain: 'eldritch-implicit', tier: e.tier, weight: e.weight })
+    }
+  }
+  // veiled
+  for (const slot of ['prefix', 'suffix'] as const) {
+    for (const e of buildVeiledPool(tags, slot, ilvl, mods).entries) if (textHit(e, q)) add({ modId: e.modId, group: e.group, label: e.text ?? e.group, slot, domain: 'veiled', weight: e.weight })
+  }
+  // influence
+  for (const inf of INFLUENCES) {
+    const ii = buildInfluenceIndex(tags, inf, ilvl, mods)
+    for (const e of [...ii.prefixes, ...ii.suffixes]) if (textHit(e, q)) add({ modId: e.modId, group: e.group, label: e.text ?? e.group, slot: e.affix, domain: 'influence', influence: inf, weight: e.weight })
+  }
+  return out
 }
