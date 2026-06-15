@@ -154,3 +154,22 @@ export function consumeResource(s: ItemState, key: string, amount = 1): ItemStat
   const current = s.resources[key] ?? 0
   return { ...s, resources: { ...s.resources, [key]: Math.max(0, current - amount) } }
 }
+
+/**
+ * Canonical, order-independent key for a state — equal states ⇒ equal keys. Used by the path
+ * solver for dedupe / memoization (the search lands next increment; the key is implemented now).
+ */
+export function stateKey(s: ItemState): string {
+  const affixes = s.affixes
+    .map(a => `${a.slot}:${a.group}:${a.modId}:${a.tier ?? ''}${a.crafted ? 'c' : ''}${a.fractured ? 'f' : ''}`)
+    .sort()
+    .join('|')
+  const meta = Object.entries(s.meta).filter(([, v]) => v).map(([k]) => k).sort().join(',')
+  const res = Object.entries(s.resources).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).sort().join(',')
+  return [
+    s.base, s.itemClass, s.ilvl, s.rarity, affixes,
+    [...s.blockedGroups].sort().join(','), meta,
+    [...s.influence].sort().join(','), [...s.fractured].sort().join(','),
+    s.quality, s.corrupted ? 'C' : '', s.catalyst ?? '', res,
+  ].join('#')
+}

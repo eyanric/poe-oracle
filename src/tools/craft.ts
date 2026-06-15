@@ -8,6 +8,7 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { estimateCraftCostLive, estimateRecombineLive, type CraftSpec, type CraftCostEstimate, type MethodSpec, type RecombineInput, type RecombineEstimate } from '../services/craftCost'
 import type { DesiredMod } from '../services/craftMethods'
+import { solveLive, type TargetSpec, type SolveResult, type SpecificMod } from '../services/solver'
 
 const slotEnum = z.enum(['prefix', 'suffix'])
 
@@ -115,6 +116,69 @@ const recombineItem = z.object({
   suffixes: z.array(recombineAffix).optional(),
   valueChaos: z.number().optional().describe('Chaos value of this input item (consumed each attempt).'),
 })
+
+// ── solve_craft (path solver, increment 1 — single-method/recipe ranked spine) ──
+
+const specificModSchema = z.object({
+  slot: slotEnum,
+  group: z.string().optional().describe('Mod group, e.g. "IncreasedLife".'),
+  modId: z.string().optional().describe('Specific RePoE mod id (a named mod at a tier).'),
+  label: z.string().describe('Human label, e.g. "maximum Life".'),
+})
+
+export function registerSolveCraftTool(server: McpServer): void {
+  server.registerTool(
+    'solve_craft',
+    {
+      title: 'Solve craft (cheapest risk-adjusted path + craft-vs-buy)',
+      description:
+        'Given a target (base, ilvl, specific desired/excluded mods), rank the modeled crafting methods + ' +
+        'encapsulated recipes that reach it by RISK-ADJUSTED expected cost (p90), with success probability, ' +
+        'risk category, propagated low-confidence flags, and a craft-vs-buy verdict (cheapest path vs the live ' +
+        'price of the SPECIFIC-VARIANT item). Deterministic-cheap-first: a benchable mod resolves to the bench ' +
+        'craft, never an expensive ladder. Specific named mods only (abstract "any T1" rejected). ⚠ Increment 1 ' +
+        'ranks single methods/recipes — multi-step cross-module sequencing is the next increment. Read-only.',
+      inputSchema: {
+        base: z.string().describe('Base item name, e.g. "Vaal Regalia".'),
+        ilvl: z.number().describe('Item level.'),
+        desired: z.array(specificModSchema).describe('Specific named mods the result must have.'),
+        excluded: z.array(specificModSchema).optional().describe('Specific named mods the result must NOT have.'),
+        league: z.string().optional().describe('League name. Defaults to the current challenge league.'),
+      },
+    },
+    async ({ base, ilvl, desired, excluded, league }) => {
+      const target: TargetSpec = { base, ilvl, desired: desired as SpecificMod[], excluded: excluded as SpecificMod[] | undefined }
+      const result = await solveLive(target, league)
+      return { content: [{ type: 'text', text: renderSolve(result) }], structuredContent: result as unknown as Record<string, unknown> }
+    },
+  )
+}
+
+function renderSolve(r: SolveResult): string {
+  const money = (c: number | null) => (c == null ? '—' : `${c.toFixed(0)}c`)
+  const lines: string[] = [
+    `**solve_craft — ${r.base} (ilvl ${r.ilvl})**${r.league ? ` · ${r.league}` : ''}${r.stampDate ? ` · ${r.stampDate}` : ''}`,
+    `Target: ${r.desired.map(d => d.label).join(' + ') || '—'}${r.excluded.length ? ` · exclude: ${r.excluded.map(d => d.label).join(', ')}` : ''}`,
+    '',
+  ]
+  if (!r.cheapest) {
+    lines.push(`⚠ No path found: ${r.verdict.rationale}`)
+    for (const n of r.notes) lines.push(`- ${n}`)
+    return lines.join('\n')
+  }
+  lines.push('**Ranked paths (risk-adjusted, cheapest first):**', '| # | Method/recipe | exp | p90 | P/attempt | risk | conf |', '|---|---|---|---|---|---|---|')
+  r.paths.filter(p => p.supported).slice(0, 8).forEach((p, i) => {
+    lines.push(`| ${i + 1} | ${p.title}${p.kind === 'recipe' ? ' _(recipe)_' : ''} | ${money(p.expectedChaos)} | ${money(p.p90)} | ${(p.perAttemptProb * 100).toFixed(1)}% | ${p.riskCategory ?? '—'} | ${p.confidence}${p.flags.length ? ' ⚠' : ''} |`)
+  })
+  const v = r.verdict
+  const tag = v.decision === 'craft-likely-cheaper' ? '🟢 CRAFT' : v.decision === 'buy-likely-cheaper' ? '🔴 BUY' : v.decision === 'overlapping' ? '🟡 OVERLAPPING' : '⚪ UNKNOWN'
+  lines.push('', `**Cheapest:** ${r.cheapest.title} ≈ ${money(r.cheapest.expectedChaos)}${r.cheapest.expectedDivine != null ? ` (${r.cheapest.expectedDivine.toFixed(2)} div)` : ''}`)
+  if (r.buySide) lines.push(`**Buy (specific variant):** ${money(r.buySide.lowChaos)}–${money(r.buySide.medianChaos)} (${r.buySide.confidence} conf)`)
+  lines.push(`**Verdict:** ${tag} (${v.confidence} conf) — ${v.rationale}`)
+  if (r.cheapest.flags.length) { lines.push('', '**⚠ Confidence flags (cheapest path):**'); for (const f of r.cheapest.flags) lines.push(`- ${f}`) }
+  if (r.notes.length) { lines.push('', '**Notes:**'); for (const n of r.notes) lines.push(`- ${n}`) }
+  return lines.join('\n')
+}
 
 export function registerRecombineTool(server: McpServer): void {
   server.registerTool(
