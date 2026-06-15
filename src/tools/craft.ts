@@ -36,7 +36,7 @@ export function registerCraftCostTool(server: McpServer): void {
             }),
           )
           .describe('Target mods to land. essence auto-targets its forced mod, so it may be empty there.'),
-        method: z.enum(['essence', 'alt-regal', 'chaos-spam', 'fossil', 'bench', 'multimod', 'slam', 'harvest', 'eldritch-implicit', 'eldritch-exalt', 'eldritch-annul', 'add-influence', 'orb-of-dominance', 'catalyst', 'anoint', 'veiled-chaos', 'veiled-exalt', 'synthesise', 'synthesis-reroll']).describe('Crafting method.'),
+        method: z.enum(['essence', 'alt-regal', 'chaos-spam', 'fossil', 'bench', 'multimod', 'slam', 'harvest', 'eldritch-implicit', 'eldritch-exalt', 'eldritch-annul', 'add-influence', 'orb-of-dominance', 'catalyst', 'anoint', 'veiled-chaos', 'veiled-exalt', 'synthesise', 'synthesis-reroll', 'strand-craft', 'remembrance', 'unravelling']).describe('Crafting method.'),
         essenceName: z.string().optional().describe('Required for method=essence, e.g. "Deafening Essence of Greed".'),
         fossilNames: z.array(z.string()).optional().describe('Required for method=fossil, e.g. ["Pristine Fossil"].'),
         benchMods: z.array(z.string()).optional().describe('Required for method=bench/multimod: bench-craft search terms, e.g. ["maximum Life", "Fire Resistance"].'),
@@ -53,6 +53,9 @@ export function registerCraftCostTool(server: McpServer): void {
         notable: z.string().optional().describe('method=anoint: the named notable to anoint (resolved via the seed recipe table).'),
         oils: z.array(z.string()).optional().describe('method=anoint: explicit 3 oils (e.g. ["Golden","Golden","Golden"]) — prices any anoint when the notable is not seeded.'),
         poolSize: z.number().optional().describe('method=synthesis-reroll: # of synthesis implicits rollable on the base (the implicit pool is NOT in the export — supply it / source from poedb).'),
+        memoryStrands: z.number().optional().describe('method=strand-craft/unravelling: Memory Strands on the item (0–100; biases tiers + depletes).'),
+        rarity: z.enum(['normal', 'magic', 'rare']).optional().describe('Item rarity (method=remembrance needs a normal item). Defaults to rare.'),
+        strandCurrency: z.string().optional().describe('method=strand-craft: the reforge/add currency used (default Chaos Orb).'),
         influence: z.array(z.string()).optional().describe('Item influence(s). eldritch ⊥ influence — influenced items are rejected for eldritch methods; add-influence requires NO existing influence.'),
         corrupted: z.boolean().optional().describe('Corrupted items cannot take eldritch implicits / influence.'),
         affixes: z.array(z.object({ slot: slotEnum, group: z.string().optional(), modId: z.string().optional(), label: z.string().optional(), influenced: z.boolean().optional() })).optional().describe('Existing affixes (eldritch annul reads the dominant side; Orb of Dominance counts `influenced` affixes — needs ≥2).'),
@@ -70,8 +73,8 @@ export function registerCraftCostTool(server: McpServer): void {
         league: z.string().optional().describe('League name. Defaults to the current challenge league.'),
       },
     },
-    async ({ baseName, ilvl, desiredMods, method, essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag, eldritchTier, eldritchImplicitTier, dominant, addInfluence, catalyst, quality, notable, oils, poolSize, influence, corrupted, affixes, blockedGroups, meta, finishedItemQuery, league }) => {
-      const methodSpec = toMethodSpec(method, { essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag, eldritchTier, eldritchImplicitTier, dominant, addInfluence, catalyst, quality, notable, oils, poolSize })
+    async ({ baseName, ilvl, desiredMods, method, essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag, eldritchTier, eldritchImplicitTier, dominant, addInfluence, catalyst, quality, notable, oils, poolSize, memoryStrands, rarity, strandCurrency, influence, corrupted, affixes, blockedGroups, meta, finishedItemQuery, league }) => {
+      const methodSpec = toMethodSpec(method, { essenceName, fossilNames, benchMods, protect, baseValueChaos, harvestCraft, harvestTag, eldritchTier, eldritchImplicitTier, dominant, addInfluence, catalyst, quality, notable, oils, poolSize, strandCurrency })
       if ('error' in methodSpec) {
         return { content: [{ type: 'text', text: `**calc_craft_cost** — input error: ${methodSpec.error}` }], isError: true }
       }
@@ -85,6 +88,8 @@ export function registerCraftCostTool(server: McpServer): void {
         influence,
         corrupted,
         affixes: affixes?.map(a => ({ slot: a.slot, group: a.group ?? a.modId ?? a.label ?? 'x', modId: a.modId ?? a.group ?? a.label ?? 'x', label: a.label, influenced: a.influenced })) as CraftSpec['affixes'],
+        rarity,
+        memoryStrands,
         finishedItemQuery,
       }
       const result = await estimateCraftCostLive(spec, league)
@@ -167,9 +172,12 @@ function toMethodSpec(
     eldritchTier?: 'lesser' | 'greater' | 'grand' | 'exceptional'; eldritchImplicitTier?: number; dominant?: 'exarch' | 'eater';
     addInfluence?: 'shaper' | 'elder' | 'crusader' | 'redeemer' | 'hunter' | 'warlord';
     catalyst?: 'abrasive' | 'accelerating' | 'fertile' | 'imbued' | 'intrinsic' | 'noxious' | 'prismatic' | 'tempering' | 'turbulent' | 'sinistral' | 'dextral'; quality?: number;
-    notable?: string; oils?: string[]; poolSize?: number;
+    notable?: string; oils?: string[]; poolSize?: number; strandCurrency?: string;
   },
 ): MethodSpec | { error: string } {
+  if (method === 'strand-craft') return { kind: 'strand-craft', currency: o.strandCurrency }
+  if (method === 'remembrance') return { kind: 'remembrance' }
+  if (method === 'unravelling') return { kind: 'unravelling' }
   if (method === 'synthesise') return { kind: 'synthesise' }
   if (method === 'synthesis-reroll') return { kind: 'synthesis-reroll', poolSize: o.poolSize }
   if (method === 'catalyst') {

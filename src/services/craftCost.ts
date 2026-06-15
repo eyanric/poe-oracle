@@ -51,6 +51,9 @@ export type MethodSpec =
   | { kind: 'veiled-exalt' }
   | { kind: 'synthesise' }
   | { kind: 'synthesis-reroll'; poolSize?: number }
+  | { kind: 'strand-craft'; currency?: string; boostPerStrand?: number; strandsPerCraft?: number }
+  | { kind: 'remembrance' }
+  | { kind: 'unravelling' }
 
 export interface CraftSpec {
   baseName: string
@@ -66,6 +69,10 @@ export interface CraftSpec {
   corrupted?: boolean
   /** Existing affixes (eldritch annul reads the dominant side's count). */
   affixes?: Affix[]
+  /** Item rarity (remembrance needs a normal item). Defaults to rare. */
+  rarity?: 'normal' | 'magic' | 'rare'
+  /** Memory Strands on the item (strand-craft / unravelling read this). */
+  memoryStrands?: number
   /** Optional name to price-check the finished item for the craft-vs-buy verdict. */
   finishedItemQuery?: string
 }
@@ -170,7 +177,8 @@ function resolveMethod(
     m.kind === 'eldritch-implicit' || m.kind === 'eldritch-exalt' || m.kind === 'eldritch-annul' ||
     m.kind === 'add-influence' || m.kind === 'orb-of-dominance' || m.kind === 'catalyst' || m.kind === 'anoint' ||
     m.kind === 'veiled-chaos' || m.kind === 'veiled-exalt' ||
-    m.kind === 'synthesise' || m.kind === 'synthesis-reroll'
+    m.kind === 'synthesise' || m.kind === 'synthesis-reroll' ||
+    m.kind === 'strand-craft' || m.kind === 'remembrance' || m.kind === 'unravelling'
   ) {
     return { method: m, desired: spec.desired }
   }
@@ -239,7 +247,7 @@ export function estimateCraftCost(spec: CraftSpec, deps: CraftDeps): CraftCostEs
   if (error) return unsupportedShell(error)
 
   // Compose through the method-module interface: build the item state, evaluate the module.
-  const state = newItemState({ base: base.name, itemClass: base.item_class, ilvl: spec.ilvl, tags: base.tags, meta: spec.meta ?? {}, blockedGroups: spec.blockedGroups, influence: spec.influence, corrupted: spec.corrupted, affixes: spec.affixes })
+  const state = newItemState({ base: base.name, itemClass: base.item_class, ilvl: spec.ilvl, tags: base.tags, meta: spec.meta ?? {}, blockedGroups: spec.blockedGroups, influence: spec.influence, corrupted: spec.corrupted, affixes: spec.affixes, rarity: spec.rarity, resources: spec.memoryStrands != null ? { memoryStrands: spec.memoryStrands } : undefined })
   const ev = evaluateMethod(state, { mods: deps.mods, bench: deps.bench, currentLeague: deps.league }, { desired, method })
   notes.push(...ev.notes)
 

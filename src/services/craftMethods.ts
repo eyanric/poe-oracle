@@ -31,6 +31,7 @@ import { catalystModule, type Catalyst } from './catalysts'
 import { anointModule } from './anoint'
 import { veiledChaosModule, veiledExaltModule } from './veiled'
 import { synthesiseModule, synthesisRerollModule } from './synthesis'
+import { strandCraftModule, remembranceModule, unravellingModule } from './memoryStrands'
 import { isLeagueActive } from './craftModule'
 import type {
   CraftModule, CraftModuleRegistry, CraftDataContext, InputSet, ModuleParams, OutcomeDistribution,
@@ -88,6 +89,12 @@ export type CraftMethod =
   | { kind: 'synthesise' }
   /** Beast (Vivid Vulture) reroll of a synthesis implicit — keep-trying (pool size flagged). */
   | { kind: 'synthesis-reroll'; poolSize?: number }
+  /** Memory-strand reforge: resource-conditioned roll (tier-boost + strand depletion). */
+  | { kind: 'strand-craft'; currency?: string; boostPerStrand?: number; strandsPerCraft?: number }
+  /** Orb of Remembrance: replenish strands on a normal item. */
+  | { kind: 'remembrance' }
+  /** Orb of Unravelling: consume all strands to gamble tier upgrades (can whiff). */
+  | { kind: 'unravelling' }
 
 /**
  * An UNPRICED craft plan the risk engine runs once `craftCost` prices each step's
@@ -441,6 +448,9 @@ export const CRAFT_MODULES: CraftModuleRegistry = {
   'veiled-exalt': veiledExaltModule,
   synthesise: synthesiseModule,
   'synthesis-reroll': synthesisRerollModule,
+  'strand-craft': strandCraftModule,
+  remembrance: remembranceModule,
+  unravelling: unravellingModule,
 }
 
 /**
