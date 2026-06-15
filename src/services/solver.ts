@@ -283,6 +283,8 @@ export const SOLVER_DEPTH_CAP = 6
 export const SOLVER_BEAM_WIDTH = 64
 
 export type MoveKind = 'method' | 'recipe' | 'lock' | 'unlock' | 'scour'
+/** Effect on existing mods: additive (adds, destroys nothing), destructive (reforge/scour), protective (lock). */
+export type MoveEffect = 'additive' | 'destructive' | 'protective'
 export interface PlanMove {
   kind: MoveKind
   label: string
@@ -295,6 +297,10 @@ export interface PlanMove {
   /** Desired mods this move lands (for method/recipe moves). */
   produces?: SpecificMod[]
   slot?: Slot
+  /** How this move affects existing mods (drives the reproduction cost). */
+  effect: MoveEffect
+  /** Does this move respect "prefixes/suffixes cannot be changed" metamods? */
+  respectsLocks: boolean
 }
 export interface Plan {
   moves: PlanMove[]
@@ -322,8 +328,14 @@ export interface MultiStepResult {
   notes: string[]
 }
 
-const REFORGE_KINDS = new Set(['alt-regal', 'chaos-spam', 'essence'])
-const isReforgeSpec = (s: MethodSpec): boolean => REFORGE_KINDS.has(s.kind)
+// Destructive methods reforge/remove existing explicit mods (vs additive add-to-open-slot methods).
+const DESTRUCTIVE_METHOD_KINDS = new Set(['alt-regal', 'chaos-spam', 'essence', 'fossil', 'harvest', 'veiled-chaos', 'strand-craft', 'eldritch-annul'])
+// Methods that IGNORE "cannot be changed" metamods (wipe a locked side anyway). ⚠ NOTE: contrary to the
+// prompt's parenthetical, Chaos/Alt/Essence DO respect the metamod in 3.28 (they reroll only the unlocked
+// side) — only Harvest reforge / fossils / scour ignore it. Modeled to the real mechanic (flagged).
+const LOCK_IGNORING_METHOD_KINDS = new Set(['harvest', 'fossil'])
+const moveEffectOf = (methodKind: string): MoveEffect => (DESTRUCTIVE_METHOD_KINDS.has(methodKind) ? 'destructive' : 'additive')
+const respectsLocksOf = (methodKind: string): boolean => !LOCK_IGNORING_METHOD_KINDS.has(methodKind)
 const minConf = (a: PathConfidence, b: PathConfidence): PathConfidence =>
   a === 'low' || b === 'low' ? 'low' : a === 'medium' || b === 'medium' ? 'medium' : 'high'
 const modPresent = (s: ItemState, d: SpecificMod): boolean =>
@@ -348,7 +360,7 @@ const nodeKey = (n: Node): string => `${stateKey(n.state)}||${n.remaining.map(d 
 function methodMove(target: TargetSpec, sub: SpecificMod[], spec: MethodSpec, deps: CraftDeps): { move: PlanMove } | null {
   const cand = methodCandidate({ ...target, desired: sub }, spec, deps)
   if (!cand.supported || !Number.isFinite(cand.rankChaos)) return null
-  return { move: { kind: 'method', label: cand.title, chaos: cand.expectedChaos, p90: cand.p90 ?? cand.expectedChaos, perAttemptProb: cand.perAttemptProb, confidence: cand.confidence, flags: cand.flags, produces: sub } }
+  return { move: { kind: 'method', label: cand.title, chaos: cand.expectedChaos, p90: cand.p90 ?? cand.expectedChaos, perAttemptProb: cand.perAttemptProb, confidence: cand.confidence, flags: cand.flags, produces: sub, effect: moveEffectOf(spec.kind), respectsLocks: respectsLocksOf(spec.kind) } }
 }
 
 /** Successor state after a method move lands `sub` (intended-outcome branch): add the mods to a rare item. */
@@ -364,7 +376,6 @@ function expand(node: Node, target: TargetSpec, base: RepoeBaseItem, deps: Craft
   const remS = remaining.filter(d => d.slot === 'suffix')
   const present = target.desired.filter(d => modPresent(state, d))
   const lockedP = !!state.meta.lockPrefixes, lockedS = !!state.meta.lockSuffixes
-  const unlockedPresent = present.filter(d => (d.slot === 'prefix' ? !lockedP : !lockedS))
   const children: Node[] = []
 
   const pushChild = (move: PlanMove, nextState: ItemState): void => {
@@ -383,14 +394,15 @@ function expand(node: Node, target: TargetSpec, base: RepoeBaseItem, deps: Craft
   for (const sub of subsets) {
     if (!sub.length) continue
     for (const spec of methodSpecsFor({ ...target, desired: sub }, base, deps)) {
-      // a REFORGE would destroy any UNLOCKED present desired ⇒ skip (protection makes it safe → allowed).
-      if (isReforgeSpec(spec) && unlockedPresent.length) continue
+      // Destructive moves are NOT skipped now: a reforge over unlocked present desired is allowed, and
+      // its REPRODUCTION cost (re-making what it wipes) is charged in planExpectedCost — so protected
+      // and unprotected plans compete on true expected cost (increment 3b).
       const mm = methodMove(target, sub, spec, deps)
       if (mm) pushChild(mm.move, applyProduce(state, sub))
     }
     // encapsulated recipe (NNN ladder) for this subset, when its shape matches.
     const rec = nnnLadderRecipe({ ...target, desired: sub }, base, deps)
-    if (rec) pushChild({ kind: 'recipe', label: rec.title, chaos: rec.expectedChaos, p90: rec.expectedChaos, perAttemptProb: rec.perAttemptProb, confidence: rec.confidence, flags: rec.flags, produces: sub }, applyProduce(state, sub))
+    if (rec) pushChild({ kind: 'recipe', label: rec.title, chaos: rec.expectedChaos, p90: rec.expectedChaos, perAttemptProb: rec.perAttemptProb, confidence: rec.confidence, flags: rec.flags, produces: sub, effect: 'additive', respectsLocks: true }, applyProduce(state, sub))
   }
 
   // (b) LOCK a fully-produced side so the other side can be rolled without destroying it.
@@ -398,23 +410,76 @@ function expand(node: Node, target: TargetSpec, base: RepoeBaseItem, deps: Craft
   const lockCraftS = deps.bench?.meta.lockSuffixes
   if (remP.length === 0 && remS.length > 0 && present.some(d => d.slot === 'prefix') && !lockedP && lockCraft) {
     const c = (priceOf(deps, lockCraft.costName) ?? 0) * lockCraft.costAmount
-    pushChild({ kind: 'lock', label: 'lock prefixes (cannot be changed)', chaos: c, p90: c, perAttemptProb: 1, confidence: 'low', flags: ['⚠ bench/meta cost stale-flagged (RePoE pre-3.28)'], slot: 'prefix' }, withBlockGroups(withMeta(asRare(state), { lockPrefixes: true }), present.filter(d => d.slot === 'prefix')))
+    pushChild({ kind: 'lock', label: 'lock prefixes (cannot be changed)', chaos: c, p90: c, perAttemptProb: 1, confidence: 'low', flags: ['⚠ bench/meta cost stale-flagged (RePoE pre-3.28)'], slot: 'prefix', effect: 'protective', respectsLocks: true }, withBlockGroups(withMeta(asRare(state), { lockPrefixes: true }), present.filter(d => d.slot === 'prefix')))
   }
   if (remS.length === 0 && remP.length > 0 && present.some(d => d.slot === 'suffix') && !lockedS && lockCraftS) {
     const c = (priceOf(deps, lockCraftS.costName) ?? 0) * lockCraftS.costAmount
-    pushChild({ kind: 'lock', label: 'lock suffixes (cannot be changed)', chaos: c, p90: c, perAttemptProb: 1, confidence: 'low', flags: ['⚠ bench/meta cost stale-flagged (RePoE pre-3.28)'], slot: 'suffix' }, withBlockGroups(withMeta(asRare(state), { lockSuffixes: true }), present.filter(d => d.slot === 'suffix')))
+    pushChild({ kind: 'lock', label: 'lock suffixes (cannot be changed)', chaos: c, p90: c, perAttemptProb: 1, confidence: 'low', flags: ['⚠ bench/meta cost stale-flagged (RePoE pre-3.28)'], slot: 'suffix', effect: 'protective', respectsLocks: true }, withBlockGroups(withMeta(asRare(state), { lockSuffixes: true }), present.filter(d => d.slot === 'suffix')))
   }
 
-  // (c) SCOUR — reset to the base (enables a fresh re-roll). Memoization + b&b prevent it from looping.
+  // (c) SCOUR — reset to the base (enables a fresh re-roll). Destructive + lock-ignoring (wipes all).
+  // Memoization + b&b prevent it from looping.
   if (state.affixes.length) {
     const c = priceOf(deps, 'Orb of Scouring') ?? 1
-    pushChild({ kind: 'scour', label: 'Orb of Scouring (reset)', chaos: c, p90: c, perAttemptProb: 1, confidence: 'high', flags: [] }, newItemState({ base: base.name, itemClass: base.item_class, ilvl: target.ilvl, tags: base.tags, rarity: 'normal' }))
+    pushChild({ kind: 'scour', label: 'Orb of Scouring (reset)', chaos: c, p90: c, perAttemptProb: 1, confidence: 'high', flags: [], effect: 'destructive', respectsLocks: false }, newItemState({ base: base.name, itemClass: base.item_class, ilvl: target.ilvl, tags: base.tags, rarity: 'normal' }))
   }
   return children
 }
 
 const withBlockGroups = (s: ItemState, mods: SpecificMod[]): ItemState =>
   mods.reduce((acc, d) => withBlockedGroup(acc, d.group ?? d.modId ?? d.label), s)
+
+/**
+ * Expected cost of a plan WITH reproduction (increment 3b): Σ per-step cost, plus for each DESTRUCTIVE step
+ * the cost of REPRODUCING every secured desired mod it destroys. "destroys" = present ∧ ¬(metamod-locked ∧
+ * step respects locks) (fracture isn't tracked at plan level). This generalizes `ladderCost`'s insight (a
+ * destructive step reproduces what it wipes) to a heterogeneous sequence. Protected plans have a zero
+ * reproduction term ⇒ cost identical to increment 2 (no regression). The recombinator recipe keeps its own
+ * probabilistic per-attempt reproduction inside `ladderCost`; this is the single-item deterministic re-make.
+ */
+export function planExpectedCost(moves: PlanMove[], cost: (m: PlanMove) => number = m => m.chaos ?? 0): number {
+  let total = 0
+  const secured: { cost: number; mods: SpecificMod[] }[] = []
+  const locked = new Set<Slot>()
+  for (const mv of moves) {
+    const c = cost(mv)
+    total += c
+    if (mv.kind === 'lock' && mv.slot) { locked.add(mv.slot); continue }
+    if (mv.effect === 'destructive') {
+      for (const s of secured) {
+        if (s.mods.some(m => !(locked.has(m.slot) && mv.respectsLocks))) total += s.cost // reproduce the wiped mod
+      }
+    }
+    if (mv.produces?.length) secured.push({ cost: c, mods: mv.produces })
+  }
+  return total
+}
+
+const invCdfAttempts = (p: number): number => (p >= 1 ? 1 : Math.max(1, Math.ceil(Math.log(1 - Math.random()) / Math.log(1 - p))))
+/**
+ * Monte-Carlo of a plan's cost — samples geometric retries per step (+ deterministic reproduction of wiped
+ * secured mods). Its mean converges to `planExpectedCost` (a sanity check on the closed form). Test-only.
+ */
+export function simulatePlanCost(moves: PlanMove[], runs = 20000): number {
+  let sum = 0
+  for (let r = 0; r < runs; r++) {
+    let cost = 0
+    const secured: { own: number; mods: SpecificMod[] }[] = []
+    const locked = new Set<Slot>()
+    for (const mv of moves) {
+      const p = mv.perAttemptProb > 0 && mv.perAttemptProb <= 1 ? mv.perAttemptProb : 1
+      const ownPerAttempt = (mv.chaos ?? 0) * p
+      cost += invCdfAttempts(p) * ownPerAttempt
+      if (mv.kind === 'lock' && mv.slot) { locked.add(mv.slot); continue }
+      if (mv.effect === 'destructive') {
+        for (const s of secured) if (s.mods.some(m => !(locked.has(m.slot) && mv.respectsLocks))) cost += s.own
+      }
+      if (mv.produces?.length) secured.push({ own: mv.chaos ?? 0, mods: mv.produces })
+    }
+    sum += cost
+  }
+  return sum / runs
+}
 
 /**
  * Bounded branch-and-bound search over method SEQUENCES (protect-then-proceed). Memoized on
@@ -453,10 +518,12 @@ export function searchPlans(target: TargetSpec, deps: CraftDeps, buySide: BuySid
       if (seen != null && seen <= node.accP90) { search.memoHits++; continue } // memoization
       visited.set(key, node.accP90)
       search.nodes++
-      if (node.remaining.length === 0) { // complete plan
-        const plan: Plan = { moves: node.moves, expectedChaos: node.accChaos, p90: node.accP90, rankChaos: node.accP90, confidence: node.confidence, flags: [...node.flags], depth: node.depth }
+      if (node.remaining.length === 0) { // complete plan — cost WITH reproduction (3b)
+        const expectedChaos = planExpectedCost(node.moves, m => m.chaos ?? 0)
+        const p90 = planExpectedCost(node.moves, m => m.p90 ?? m.chaos ?? 0)
+        const plan: Plan = { moves: node.moves, expectedChaos, p90, rankChaos: p90, confidence: node.confidence, flags: [...node.flags], depth: node.depth }
         complete.push(plan)
-        best = Math.min(best, node.accP90)
+        best = Math.min(best, plan.rankChaos) // b&b bound on true cost; accP90 (Σ, no repro) is the admissible lower bound
         continue
       }
       if (node.depth >= SOLVER_DEPTH_CAP) continue
@@ -468,9 +535,9 @@ export function searchPlans(target: TargetSpec, deps: CraftDeps, buySide: BuySid
 
   const plans = complete.sort((a, b) => a.rankChaos - b.rankChaos)
   const cheapestPlan = plans[0] ?? null
-  if (!plans.length) notes.push('no protected single/multi-step plan reaches this target on the core method set (specialized methods + unprotected reproduction are increment 3).')
+  if (!plans.length) notes.push('no single/multi-step plan reaches this target on the core + influence/eldritch/veiled method set (anoint/synthesis producers are deferred).')
   if (cheapestPlan?.confidence === 'low') notes.push('⚠ cheapest plan rests on flagged low-confidence magnitudes — not authoritative; see flags.')
-  notes.push(`searched ${search.nodes} nodes (memo hits ${search.memoHits}, pruned ${search.pruned}); protect-then-proceed only — unprotected cross-step reproduction is increment 3 (returned plans are a safe upper bound).`)
+  notes.push(`searched ${search.nodes} nodes (memo hits ${search.memoHits}, pruned ${search.pruned}); protected + unprotected plans compete on true expected cost (destructive steps charged reproduction, respectsLocks-aware).`)
 
   return { base: target.base, ilvl: target.ilvl, desired: target.desired, excluded: target.excluded ?? [], startKey, plans, cheapestPlan, buySide, verdict: solverVerdict(cheapestPlan, buySide), search, notes }
 }
