@@ -12,10 +12,12 @@
  * explicit yields ZERO specialized candidates (no false positives). The `eldritch ⊥ influence`
  * exclusion is enforced at the plan level by `classifyMod` (the solver rejects a target mixing them).
  *
- * DEFERRED (seams, not built here): anoint (needs the notable→oil recipe table), synthesis (the
- * implicit pool is NOT in repoe-fork — unclassifiable, so a synthesis target gets no specialized
- * candidate ⇒ not guessed), catalyst (scales an existing mod's magnitude — a refinement, not a
- * producer), strand (a state-conditioning boost, not a producer). Clean-room; analysis-only.
+ * ANOINT is an enchant-slot producer (data/anointRecipes seed table): an anoint target (a notable on
+ * an amulet) classifies to the `anoint` method with its fixed 3 oils — disjoint from the affix
+ * producers. DEFERRED (seams, not built here): synthesis (the implicit pool is NOT in repoe-fork —
+ * unclassifiable, so a synthesis target gets no specialized candidate ⇒ not guessed), catalyst (scales
+ * an existing mod's magnitude — a refinement, not a producer), strand (a state-conditioning boost, not
+ * a producer). Clean-room; analysis-only.
  */
 import type { RepoeBaseItem, RepoeMod } from '../data/repoe'
 import type { MethodSpec } from './craftCost'
@@ -24,10 +26,11 @@ import { buildInfluenceIndex, INFLUENCES, type Influence } from './influence'
 import { buildEldritchIndex, ELDRITCH_BASE_TAGS } from './eldritch'
 import { buildVeiledPool } from './veiled'
 import { resolveBaseModIndex, modRollProbability } from './modWeightIndex'
+import { isAnointableNotable } from '../data/anointRecipes'
 
 /** Minimal target-mod shape (structurally compatible with the solver's SpecificMod). */
-export interface ProducerMod { slot: Slot; group?: string; modId?: string }
-export type ModClass = 'influence' | 'eldritch' | 'veiled' | 'core'
+export interface ProducerMod { slot: Slot; group?: string; modId?: string; anoint?: boolean }
+export type ModClass = 'influence' | 'eldritch' | 'veiled' | 'anoint' | 'core'
 export interface Classification { classes: Set<ModClass>; specs: MethodSpec[] }
 
 const matches = (e: { modId: string; group: string }, mod: ProducerMod): boolean =>
@@ -45,12 +48,28 @@ export function clearModProducerCache(): void { cache.clear() }
  * single mod — that disjointness is what the plan-level `eldritch ⊥ influence` guard relies on.
  */
 export function classifyMod(mod: ProducerMod, base: RepoeBaseItem, ilvl: number, mods: Record<string, RepoeMod>): Classification {
-  const key = `${base.name}|${ilvl}|${mod.slot}|${mod.modId ?? mod.group ?? '?'}`
+  const key = `${base.name}|${ilvl}|${mod.slot}|${mod.modId ?? mod.group ?? '?'}|${mod.anoint ? 'A' : ''}`
   const hit = cache.get(key)
   if (hit) return hit
   const tags = new Set(base.tags)
   const classes = new Set<ModClass>()
   const specs: MethodSpec[] = []
+
+  // ANOINT — a notable in the enchant slot (NOT an affix), so it is disjoint from the affix
+  // producers below: an anoint target classifies ONLY against the recipe table (amulet base +
+  // a seeded notable). Non-anointable notable ⇒ no candidate (no false positive). The modId is
+  // the notable name. Cached + returned early — the influence/eldritch/veiled checks are affix-
+  // based and irrelevant to an enchant.
+  if (mod.anoint) {
+    const notable = mod.modId ?? mod.group
+    if (notable && base.tags.includes('amulet') && isAnointableNotable(notable)) {
+      classes.add('anoint'); specs.push({ kind: 'anoint', notable })
+    }
+    if (!classes.size) classes.add('core')
+    const r: Classification = { classes, specs }
+    cache.set(key, r)
+    return r
+  }
 
   // INFLUENCE — every influence whose {slot}_{codename}-gated pool contains the mod (all routes).
   for (const inf of INFLUENCES) {

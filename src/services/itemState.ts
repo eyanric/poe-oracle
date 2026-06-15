@@ -72,6 +72,9 @@ export interface ItemState {
   quality: number
   catalyst?: string
   corrupted?: boolean
+  /** Amulet anoint — a notable in the ENCHANT slot (one per item). Separate from prefix/suffix
+   *  affixes: it does not consume affix capacity and is not reachable by affix-rolling methods. */
+  anoint?: string
   resources: ItemResources
 }
 
@@ -94,6 +97,7 @@ export interface NewItemStateInput {
   fractured?: string[]
   quality?: number
   corrupted?: boolean
+  anoint?: string
   resources?: ItemResources
 }
 
@@ -114,6 +118,7 @@ export function newItemState(i: NewItemStateInput): ItemState {
     fractured: i.fractured ?? [],
     quality: i.quality ?? 0,
     corrupted: i.corrupted,
+    anoint: i.anoint,
     resources: i.resources ?? {},
   }
 }
@@ -149,6 +154,9 @@ export const withBlockedGroup = (s: ItemState, group: string): ItemState =>
 
 export const withMeta = (s: ItemState, patch: MetaModsState): ItemState => ({ ...s, meta: { ...s.meta, ...patch } })
 
+/** Set the amulet anoint (enchant slot — replaces any existing anoint; does not touch affixes). */
+export const withAnoint = (s: ItemState, notable: string): ItemState => ({ ...s, anoint: notable })
+
 /** Deplete a per-item resource (clamped at 0). */
 export function consumeResource(s: ItemState, key: string, amount = 1): ItemState {
   const current = s.resources[key] ?? 0
@@ -170,6 +178,6 @@ export function stateKey(s: ItemState): string {
     s.base, s.itemClass, s.ilvl, s.rarity, affixes,
     [...s.blockedGroups].sort().join(','), meta,
     [...s.influence].sort().join(','), [...s.fractured].sort().join(','),
-    s.quality, s.corrupted ? 'C' : '', s.catalyst ?? '', res,
+    s.quality, s.corrupted ? 'C' : '', s.catalyst ?? '', s.anoint ?? '', res,
   ].join('#')
 }

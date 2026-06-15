@@ -19,7 +19,7 @@ import { getBenchOptions } from '../data/repoe'
 import { estimateCraftCost, type CraftDeps, type CraftCostEstimate, type MethodSpec, type BuySide } from './craftCost'
 import type { DesiredMod } from './craftMethods'
 import { normalizeBench } from './benchCrafting'
-import { newItemState, stateKey, withAffix, withMeta, withBlockedGroup, RARITY_CAPS, type ItemState, type Slot } from './itemState'
+import { newItemState, stateKey, withAffix, withAnoint, withMeta, withBlockedGroup, RARITY_CAPS, type ItemState, type Slot } from './itemState'
 import { buildBaseModIndex, modRollProbability } from './modWeightIndex'
 import { evaluateLadder } from './ladderCost'
 import { pSlotSurviveNNN, RECOMBINATOR_COUNT_DIST } from './recombine'
@@ -32,8 +32,10 @@ import { respectsLock, blockedOnLockedItem } from './lockMatrix'
 import type { RiskCategory } from './craftRisk'
 
 /** A specific named mod — the shape the UI per-mod picker emits. No abstract "any T1".
- *  `minTier` (opt-in) widens it to "this group at tier ≥ floor" (1 = best); absent ⇒ exact. */
-export interface SpecificMod { slot: Slot; group?: string; modId?: string; label: string; minTier?: number }
+ *  `minTier` (opt-in) widens it to "this group at tier ≥ floor" (1 = best); absent ⇒ exact.
+ *  `anoint: true` ⇒ the target is an amulet ENCHANT (the notable named by `modId`), not an affix;
+ *  `slot` is then nominal/ignored — it's matched against the enchant slot, not prefix/suffix. */
+export interface SpecificMod { slot: Slot; group?: string; modId?: string; label: string; minTier?: number; anoint?: boolean }
 export interface TargetSpec {
   base: string
   ilvl: number
@@ -108,6 +110,11 @@ const flagsFromNotes = (notes: string[]): string[] => notes.filter(n => n.includ
  * are deferred to the next increment.
  */
 function methodSpecsFor(target: TargetSpec, base: RepoeBaseItem, deps: CraftDeps): MethodSpec[] {
+  // Anoint targets occupy the enchant slot — affix methods can't roll a notable, so a single
+  // anoint target gets ONLY its recipe-backed producer (empty if the notable isn't anointable).
+  if (target.desired.length === 1 && target.desired[0].anoint) {
+    return modProducers(target.desired[0], base, target.ilvl, deps.mods)
+  }
   const specs: MethodSpec[] = []
   const n = target.desired.length
   const groups = new Set(target.desired.map(d => d.group).filter(Boolean) as string[])
@@ -338,12 +345,15 @@ const moveEffectOf = (methodKind: string): MoveEffect => (DESTRUCTIVE_METHOD_KIN
 const respectsLocksOf = (methodKind: string): boolean => respectsLock(methodKind)
 const minConf = (a: PathConfidence, b: PathConfidence): PathConfidence =>
   a === 'low' || b === 'low' ? 'low' : a === 'medium' || b === 'medium' ? 'medium' : 'high'
+const anointId = (d: SpecificMod): string => d.modId ?? d.group ?? d.label
 const modPresent = (s: ItemState, d: SpecificMod): boolean =>
-  s.affixes.some(a => {
-    if (a.slot !== d.slot) return false
-    if (d.minTier != null && d.group) return a.group === d.group && (a.tier ?? Infinity) <= d.minTier // floored: group at tier ≤ floor
-    return d.modId ? a.modId === d.modId : d.group ? a.group === d.group : false
-  })
+  d.anoint
+    ? s.anoint === anointId(d) // enchant slot — the notable, not an affix
+    : s.affixes.some(a => {
+        if (a.slot !== d.slot) return false
+        if (d.minTier != null && d.group) return a.group === d.group && (a.tier ?? Infinity) <= d.minTier // floored: group at tier ≤ floor
+        return d.modId ? a.modId === d.modId : d.group ? a.group === d.group : false
+      })
 const affixOf = (d: SpecificMod) => ({ slot: d.slot, group: d.group ?? d.modId ?? d.label, modId: d.modId ?? d.group ?? d.label, tier: d.minTier })
 const asRare = (s: ItemState): ItemState => (s.rarity === 'rare' ? s : { ...s, rarity: 'rare', caps: { ...RARITY_CAPS.rare } })
 const priceOf = (deps: CraftDeps, name: string): number | null => { const m = searchEconomy(deps.snapshot, name, 'currency', 1)[0]; return m && m.chaosValue > 0 ? m.chaosValue : null }
@@ -358,7 +368,7 @@ interface Node {
   flags: Set<string>
   depth: number
 }
-const nodeKey = (n: Node): string => `${stateKey(n.state)}||${n.remaining.map(d => `${d.slot}:${d.group ?? d.modId}`).sort().join(',')}`
+const nodeKey = (n: Node): string => `${stateKey(n.state)}||${n.remaining.map(d => d.anoint ? `anoint:${anointId(d)}` : `${d.slot}:${d.group ?? d.modId}`).sort().join(',')}`
 
 /** A method move producing a desired subset on the current (open-slot-respecting) state. */
 function methodMove(target: TargetSpec, sub: SpecificMod[], spec: MethodSpec, deps: CraftDeps): { move: PlanMove } | null {
@@ -370,14 +380,18 @@ function methodMove(target: TargetSpec, sub: SpecificMod[], spec: MethodSpec, de
 /** Successor state after a method move lands `sub` (intended-outcome branch): add the mods to a rare item. */
 function applyProduce(state: ItemState, sub: SpecificMod[]): ItemState {
   let s = asRare(state)
-  for (const d of sub) if (!modPresent(s, d)) s = withAffix(s, affixOf(d))
+  for (const d of sub) {
+    if (modPresent(s, d)) continue
+    s = d.anoint ? withAnoint(s, anointId(d)) : withAffix(s, affixOf(d)) // anoint → enchant slot
+  }
   return s
 }
 
 function expand(node: Node, target: TargetSpec, base: RepoeBaseItem, deps: CraftDeps): Node[] {
   const { state, remaining } = node
-  const remP = remaining.filter(d => d.slot === 'prefix')
-  const remS = remaining.filter(d => d.slot === 'suffix')
+  const remP = remaining.filter(d => d.slot === 'prefix' && !d.anoint)
+  const remS = remaining.filter(d => d.slot === 'suffix' && !d.anoint)
+  const remAnoint = remaining.filter(d => d.anoint)
   const present = target.desired.filter(d => modPresent(state, d))
   const lockedP = !!state.meta.lockPrefixes, lockedS = !!state.meta.lockSuffixes
   const hasLock = lockedP || lockedS
@@ -396,6 +410,9 @@ function expand(node: Node, target: TargetSpec, base: RepoeBaseItem, deps: Craft
   // (a) produce-via-method: the whole remaining set (depth-1 completion) + each single affix side.
   const subsets: SpecificMod[][] = [remaining]
   if (remP.length && remS.length) { subsets.push(remP); subsets.push(remS) }
+  // Each anoint is its own enchant-slot move (produced independently of affixes); only split out
+  // when the target is mixed (a lone anoint is already covered by the whole-remaining subset).
+  if (remaining.length > 1) for (const a of remAnoint) subsets.push([a])
   for (const sub of subsets) {
     if (!sub.length) continue
     for (const spec of methodSpecsFor({ ...target, desired: sub }, base, deps)) {
@@ -545,7 +562,7 @@ export function searchPlans(target: TargetSpec, deps: CraftDeps, buySide: BuySid
 
   const plans = complete.sort((a, b) => a.rankChaos - b.rankChaos)
   const cheapestPlan = plans[0] ?? null
-  if (!plans.length) notes.push('no single/multi-step plan reaches this target on the core + influence/eldritch/veiled method set (anoint/synthesis producers are deferred).')
+  if (!plans.length) notes.push('no single/multi-step plan reaches this target on the core + influence/eldritch/veiled/anoint method set (synthesis producer is deferred — implicit pool not in the export).')
   if (cheapestPlan?.confidence === 'low') notes.push('⚠ cheapest plan rests on flagged low-confidence magnitudes — not authoritative; see flags.')
   notes.push(`searched ${search.nodes} nodes (memo hits ${search.memoHits}, pruned ${search.pruned}); protected + unprotected plans compete on true expected cost (destructive steps charged reproduction, respectsLocks-aware).`)
 

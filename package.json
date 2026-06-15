@@ -33,6 +33,7 @@
     "validate:influence": "tsx scripts/validate-influence.mjs",
     "validate:catalysts": "tsx scripts/validate-catalysts.mjs",
     "validate:anoint": "tsx scripts/validate-anoint.mjs",
+    "validate:anoint-producer": "tsx scripts/validate-anoint-producer.mjs",
     "validate:veiled": "tsx scripts/validate-veiled.mjs",
     "validate:synthesis": "tsx scripts/validate-synthesis.mjs",
     "validate:memory-strands": "tsx scripts/validate-memory-strands.mjs",

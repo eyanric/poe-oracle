@@ -4,10 +4,12 @@
  * Three Blight oils combine into a specific Notable passive as an amulet enchantment.
  * Deterministic (P=1): cost = the three oils, priced live (oils now in the economy snapshot).
  *
- * ⚠ The notable→3-oil recipe table is NOT in the repoe-fork export (it is Blight anoint data).
- * The full ~455-combination table must be sourced from poedb/PoE wiki — here it is a small CURATED,
- * flagged SEED. To stay useful without inventing recipes, the module also accepts an EXPLICIT
- * 3-oil list and prices it directly (so any anoint can be costed; the seed only saves a lookup).
+ * ⚠ The notable→3-oil recipe table is NOT in any Code-fetchable export (it is Blight crafting data;
+ * diagnosis in docs/reports/anoint-producer.md) — it lives as a hand-sourced SEED in
+ * data/anointRecipes (populate the full ~455-notable table from poedb). To stay useful without
+ * inventing recipes, the module also accepts an EXPLICIT 3-oil list and prices it directly (so any
+ * anoint can be costed; the seed only saves the notable→oils lookup). The solver's anoint PRODUCER
+ * (modProducer.classifyMod) proposes this method for an anointable-notable target.
  *
  * Variants (flagged, NOT modelled here): ring anointing (Blight-ravaged maps, different oils),
  * cluster-jewel anoints (one oil), Blight-unique enchant pools (separate pools), and the Mirage
@@ -16,23 +18,14 @@
 import type { ItemState } from './itemState'
 import type { CraftModule, InputSet, ModuleParams, OutcomeDistribution } from './craftModule'
 import type { ExpectedAttemptsResult, PlanStepBlueprint } from './craftMethods'
+import { OIL_TIERS, ANOINT_RECIPES, type Oil } from '../data/anointRecipes'
 
-/** Oil tiers, cheapest → priciest (3 of a tier vendor up to 1 of the next). */
-export const OIL_TIERS = [
-  'Clear', 'Sepia', 'Amber', 'Verdant', 'Teal', 'Azure', 'Indigo',
-  'Violet', 'Crimson', 'Black', 'Opalescent', 'Silver', 'Golden',
-] as const
-export type Oil = (typeof OIL_TIERS)[number]
+// Oils + the notable→recipe table live in the data layer (data/anointRecipes); re-exported here
+// for the method-module surface. See that file for the sourcing diagnosis (the table is a seed).
+export { OIL_TIERS, ANOINT_RECIPES }
+export type { Oil }
 const oilItem = (o: Oil): string => `${o} Oil`
 const isOil = (s: string): s is Oil => (OIL_TIERS as readonly string[]).includes(s)
-
-/**
- * ⚠ CURATED SEED (PoE wiki) — not in the data export; the full notable→recipe table must be
- * sourced from poedb. Entries here are confirmed; for anything else, pass explicit `oils`.
- */
-export const ANOINT_RECIPES: Record<string, [Oil, Oil, Oil]> = {
-  'Whispers of Doom': ['Golden', 'Golden', 'Golden'], // confirmed: +1 curse (the iconic anoint)
-}
 
 const ANOINT_BASE_TAG = 'amulet'
 
