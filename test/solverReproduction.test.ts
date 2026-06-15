@@ -19,8 +19,8 @@ describe('planExpectedCost — reproduction term', () => {
     const moves = [produceP, lockPre, mv({ label: 'reforge S', chaos: 20, perAttemptProb: 0.5, effect: 'destructive', respectsLocks: true, produces: S })]
     expect(planExpectedCost(moves)).toBe(10 + 400 + 20)
   })
-  it('respectsLocks honoured: a LOCK-IGNORING destructive after the lock DOES reproduce the locked mod', () => {
-    const moves = [produceP, lockPre, mv({ label: 'harvest-reforge S', chaos: 20, perAttemptProb: 0.5, effect: 'destructive', respectsLocks: false, produces: S })]
+  it('respectsLocks honoured: a LOCK-IGNORING destructive (Awakener\'s / Dominance) after the lock DOES reproduce the locked mod', () => {
+    const moves = [produceP, lockPre, mv({ label: 'Orb of Dominance', chaos: 20, perAttemptProb: 0.5, effect: 'destructive', respectsLocks: false, produces: S })]
     expect(planExpectedCost(moves)).toBe(10 + 400 + 20 + 10) // +10 = reproduce P (lock ignored)
   })
   it('unprotected: a destructive step over an unlocked secured mod reproduces it', () => {

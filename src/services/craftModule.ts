@@ -90,10 +90,10 @@ export interface CraftModule {
   title: string
   arity: 1 | 2
   /**
-   * Does this method respect "prefixes/suffixes cannot be changed" meta-mods?
-   * Bench/slam = true; Harvest reforge = FALSE (it ignores meta-locks and will wipe
-   * "locked" affixes — so `toRiskSteps` must not call such a reforge protected/safe).
-   * Omitted ⇒ true.
+   * Does this method respect "prefixes/suffixes cannot be changed" meta-mods? The matrix lives in
+   * `lockMatrix.ts` (single source): nearly everything RESPECTS (incl. Chaos, Harvest reforge, Scour);
+   * only Awakener's / Orb of Dominance / Unravelling IGNORE; Essence + Fossil are BLOCKED on a locked
+   * item. Omitted ⇒ true (respects).
    */
   respectsLocks?: boolean
   /**

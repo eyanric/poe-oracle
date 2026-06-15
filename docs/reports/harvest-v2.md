@@ -2,6 +2,10 @@
 
 **Date:** 2026-06-14 · **League:** 3.28 Mirage · **Status:** shipped, gates green (198 tests, parity intact).
 
+> **⚠ CORRECTED 2026-06-15 (see [lock-matrix-fix.md](lock-matrix-fix.md)):** statements below that "Harvest
+> reforge ignores meta-locks (`respectsLocks=false`, DANGER)" are WRONG — Harvest reforge **RESPECTS** "cannot
+> be changed" in 3.28 (rerolls only the unlocked side). `respectsLocks` is now `true`; the DANGER note is gone.
+
 Refines Harvest with the 3.28 Mirage additions. The **durable win is league-availability gating**
 (reusable for every league-specific mechanic); Rancour is its first real test. No recombinators/memory
 strands, no solver, no Track B, no automation. Clean-room.

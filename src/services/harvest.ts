@@ -3,9 +3,9 @@
  *
  * Single-item (arity 1), but the proving ground that genuinely READS the item state:
  * `augment` reads `blockedGroups` + occupied slots, so a pool blocked down to the
- * desired tag mod is DETERMINISTIC while an open pool is a distribution. Harvest also
- * IGNORES "prefixes/suffixes cannot be changed" meta-locks (`respectsLocks = false`):
- * a reforge on a locked item wipes the locked affixes — flagged, never called safe.
+ * desired tag mod is DETERMINISTIC while an open pool is a distribution. Harvest reforge
+ * RESPECTS "prefixes/suffixes cannot be changed" (`respectsLocks` from the lock matrix) —
+ * it rerolls only the unlocked side, leaving the locked side intact (poewiki/Maxroll, 3.28).
  *
  * Pure/queryable. Costs are lifeforce (colour + amount) priced live; amounts are
  * low-confidence (see data/harvestCrafts.ts provenance).
@@ -16,6 +16,7 @@ import {
   harvestCraft, LIFEFORCE_ITEM, RANCOUR_ITEM, HARVEST_TAG_TO_MODTAG, HARVEST_PROVENANCE, type HarvestCraft,
 } from '../data/harvestCrafts'
 import { isLeagueActive, type CraftModule, type InputSet, type CraftDataContext, type ModuleParams, type OutcomeDistribution, type Applicability } from './craftModule'
+import { respectsLock } from './lockMatrix'
 import type { ExpectedAttemptsResult, PlanStepBlueprint, DesiredMod, CraftMethod } from './craftMethods'
 import type { RepoeMod } from '../data/repoe'
 
@@ -57,7 +58,7 @@ function evaluateHarvest(state: ItemState, data: CraftDataContext, params: Modul
 
   const locks = !!(state.meta.lockPrefixes || state.meta.lockSuffixes)
   if (locks && m.craft === 'reforge') {
-    notes.push('⚠ DANGER: Harvest reforge IGNORES "cannot be changed" — it will WIPE the locked affixes. Not a safe/protected craft.')
+    notes.push('Harvest reforge RESPECTS "cannot be changed" — it rerolls only the unlocked side; the locked side is kept (safe).')
   }
 
   // ── remove: deterministic ────────────────────────────────────────────────
@@ -124,7 +125,7 @@ export const harvestModule: CraftModule = {
   id: 'harvest',
   title: 'Harvest (lifeforce)',
   arity: 1,
-  respectsLocks: false, // Harvest ignores "cannot be changed" meta-mods
+  respectsLocks: respectsLock('harvest'), // RESPECTS "cannot be changed" (single source: lockMatrix)
   evaluate: (inputs: InputSet, data, params) => evaluateHarvest(inputs[0], data, params),
   applicable: (inputs: InputSet, data, params): Applicability => {
     const r = evaluateHarvest(inputs[0], data, params)

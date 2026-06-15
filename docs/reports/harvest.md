@@ -40,7 +40,11 @@ the item state**:
 - **Remove [tag]** → deterministic (`fixed`).
 - **Change [tag]→[tag]** → not modelled (not confirmed present in 3.28; omitted rather than guessed).
 
-**CRITICAL — ignores meta-locks (confirmed in code + test):** Harvest reforge does **not** respect
+**⚠ CORRECTED 2026-06-15 (see [lock-matrix-fix.md](lock-matrix-fix.md)):** the claim below is WRONG —
+**Harvest reforge RESPECTS "cannot be changed"** in 3.28 (rerolls only the unlocked side; the locked side is
+kept). `respectsLocks` is now `true` and the DANGER note is removed. The original (incorrect) text follows.
+
+**~~CRITICAL — ignores meta-locks (confirmed in code + test):~~** Harvest reforge does **not** respect
 "prefixes/suffixes cannot be changed." The module reforges ignoring those metas, sets
 `respectsLocks = false`, flags a **DANGER** note ("will WIPE the locked affixes"), and `toRiskSteps`
 emits a `keep-trying` reforge — **never** a protected/`recoverable` slam. (`respectsLocks` is now an

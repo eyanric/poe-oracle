@@ -36,9 +36,9 @@ describe('Harvest data (3.28)', () => {
 })
 
 describe('Harvest module on the interface', () => {
-  it('is arity-1 and does NOT respect meta-locks', () => {
+  it('is arity-1 and RESPECTS meta-locks (Harvest reforge keeps the locked side, 3.28)', () => {
     expect(harvestModule.arity).toBe(1)
-    expect(harvestModule.respectsLocks).toBe(false)
+    expect(harvestModule.respectsLocks).toBe(true)
   })
 
   it('reforge-with-tag → a real distribution (tag guaranteed, target is a share)', () => {
@@ -104,12 +104,12 @@ describe('Harvest module on the interface', () => {
     expect(isLeagueActive(['Mirage'], undefined)).toBe(true) // unknown league ⇒ don't gate
   })
 
-  it('IGNORES meta-locks: a reforge on a locked item is supported and flagged DANGEROUS (not safe)', () => {
+  it('RESPECTS meta-locks: a reforge on a locked item is supported and flagged SAFE (keeps the locked side)', () => {
     const locked = withMeta(rare(), { lockSuffixes: true })
     const r = harvestModule.evaluate([locked] as InputSet, data, params('reforge'))
-    expect(r.supported).toBe(true) // reforge proceeds despite the lock
-    expect(r.notes.join(' ')).toMatch(/IGNORES|WIPE/)
-    // and the risk steps are NOT a protected slam — it's a keep-trying reforge
+    expect(r.supported).toBe(true) // reforge proceeds, rerolling only the unlocked side
+    expect(r.notes.join(' ')).toMatch(/RESPECTS|keeps the locked|safe/i)
+    // it's a keep-trying reforge, not a protected slam
     expect(harvestModule.toRiskSteps([locked] as InputSet, data, params('reforge')).every(s => s.kind !== 'slam')).toBe(true)
   })
 })

@@ -28,6 +28,7 @@ import { resolveCurrentLeague } from './LeagueResolver'
 import { estimateRarePriceLive } from './rarePricing'
 import { searchEconomy } from './economySearch'
 import { modProducers, classifyMod } from './modProducer'
+import { respectsLock, blockedOnLockedItem } from './lockMatrix'
 import type { RiskCategory } from './craftRisk'
 
 /** A specific named mod — the shape the UI per-mod picker emits. No abstract "any T1". */
@@ -330,12 +331,10 @@ export interface MultiStepResult {
 
 // Destructive methods reforge/remove existing explicit mods (vs additive add-to-open-slot methods).
 const DESTRUCTIVE_METHOD_KINDS = new Set(['alt-regal', 'chaos-spam', 'essence', 'fossil', 'harvest', 'veiled-chaos', 'strand-craft', 'eldritch-annul'])
-// Methods that IGNORE "cannot be changed" metamods (wipe a locked side anyway). ⚠ NOTE: contrary to the
-// prompt's parenthetical, Chaos/Alt/Essence DO respect the metamod in 3.28 (they reroll only the unlocked
-// side) — only Harvest reforge / fossils / scour ignore it. Modeled to the real mechanic (flagged).
-const LOCK_IGNORING_METHOD_KINDS = new Set(['harvest', 'fossil'])
 const moveEffectOf = (methodKind: string): MoveEffect => (DESTRUCTIVE_METHOD_KINDS.has(methodKind) ? 'destructive' : 'additive')
-const respectsLocksOf = (methodKind: string): boolean => !LOCK_IGNORING_METHOD_KINDS.has(methodKind)
+// Lock interaction is the single source of truth in lockMatrix.ts (Harvest reforge + Scour RESPECT;
+// only Awakener's / Dominance / Unravelling ignore; Essence + Fossil are BLOCKED on a locked item).
+const respectsLocksOf = (methodKind: string): boolean => respectsLock(methodKind)
 const minConf = (a: PathConfidence, b: PathConfidence): PathConfidence =>
   a === 'low' || b === 'low' ? 'low' : a === 'medium' || b === 'medium' ? 'medium' : 'high'
 const modPresent = (s: ItemState, d: SpecificMod): boolean =>
@@ -376,6 +375,7 @@ function expand(node: Node, target: TargetSpec, base: RepoeBaseItem, deps: Craft
   const remS = remaining.filter(d => d.slot === 'suffix')
   const present = target.desired.filter(d => modPresent(state, d))
   const lockedP = !!state.meta.lockPrefixes, lockedS = !!state.meta.lockSuffixes
+  const hasLock = lockedP || lockedS
   const children: Node[] = []
 
   const pushChild = (move: PlanMove, nextState: ItemState): void => {
@@ -394,9 +394,10 @@ function expand(node: Node, target: TargetSpec, base: RepoeBaseItem, deps: Craft
   for (const sub of subsets) {
     if (!sub.length) continue
     for (const spec of methodSpecsFor({ ...target, desired: sub }, base, deps)) {
-      // Destructive moves are NOT skipped now: a reforge over unlocked present desired is allowed, and
-      // its REPRODUCTION cost (re-making what it wipes) is charged in planExpectedCost — so protected
-      // and unprotected plans compete on true expected cost (increment 3b).
+      // BLOCKED moves (Essence / Fossil) are illegal once a Cannot-Be-Changed metamod is present — don't
+      // generate them. Destructive moves are otherwise allowed; their REPRODUCTION cost (re-making what
+      // they wipe, respectsLocks-aware) is charged in planExpectedCost so plans compete on true cost.
+      if (hasLock && blockedOnLockedItem(spec.kind)) continue
       const mm = methodMove(target, sub, spec, deps)
       if (mm) pushChild(mm.move, applyProduce(state, sub))
     }
@@ -417,11 +418,15 @@ function expand(node: Node, target: TargetSpec, base: RepoeBaseItem, deps: Craft
     pushChild({ kind: 'lock', label: 'lock suffixes (cannot be changed)', chaos: c, p90: c, perAttemptProb: 1, confidence: 'low', flags: ['⚠ bench/meta cost stale-flagged (RePoE pre-3.28)'], slot: 'suffix', effect: 'protective', respectsLocks: true }, withBlockGroups(withMeta(asRare(state), { lockSuffixes: true }), present.filter(d => d.slot === 'suffix')))
   }
 
-  // (c) SCOUR — reset to the base (enables a fresh re-roll). Destructive + lock-ignoring (wipes all).
-  // Memoization + b&b prevent it from looping.
-  if (state.affixes.length) {
+  // (c) SCOUR — reset for a fresh re-roll. RESPECTS "cannot be changed": a locked side is kept (Scour
+  // removes only the unlocked mods), so no reproduction for the locked side. Memoization + b&b prevent
+  // it from looping. Only meaningful when there are unlocked affixes to clear.
+  const clearable = state.affixes.filter(a => !((a.slot === 'prefix' && lockedP) || (a.slot === 'suffix' && lockedS)))
+  if (clearable.length) {
     const c = priceOf(deps, 'Orb of Scouring') ?? 1
-    pushChild({ kind: 'scour', label: 'Orb of Scouring (reset)', chaos: c, p90: c, perAttemptProb: 1, confidence: 'high', flags: [], effect: 'destructive', respectsLocks: false }, newItemState({ base: base.name, itemClass: base.item_class, ilvl: target.ilvl, tags: base.tags, rarity: 'normal' }))
+    const kept = state.affixes.filter(a => (a.slot === 'prefix' && lockedP) || (a.slot === 'suffix' && lockedS))
+    const scoured = newItemState({ base: base.name, itemClass: base.item_class, ilvl: target.ilvl, tags: base.tags, rarity: kept.length ? 'rare' : 'normal', affixes: kept, meta: state.meta })
+    pushChild({ kind: 'scour', label: 'Orb of Scouring (reset)', chaos: c, p90: c, perAttemptProb: 1, confidence: 'high', flags: [], effect: 'destructive', respectsLocks: true }, scoured)
   }
   return children
 }
