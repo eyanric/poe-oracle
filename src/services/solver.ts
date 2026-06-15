@@ -27,6 +27,7 @@ import { getEconomyProvider } from './EconomyProvider'
 import { resolveCurrentLeague } from './LeagueResolver'
 import { estimateRarePriceLive } from './rarePricing'
 import { searchEconomy } from './economySearch'
+import { modProducers, classifyMod } from './modProducer'
 import type { RiskCategory } from './craftRisk'
 
 /** A specific named mod — the shape the UI per-mod picker emits. No abstract "any T1". */
@@ -121,6 +122,8 @@ function methodSpecsFor(target: TargetSpec, base: RepoeBaseItem, deps: CraftDeps
     }
     specs.push({ kind: 'chaos-spam' }) // single-mod rare reroll
     specs.push({ kind: 'slam' })       // single-mod open-slot add
+    // SPECIALIZED producers (influence / eldritch / veiled) — the producer index, increment 3a.
+    specs.push(...modProducers(target.desired[0], base, target.ilvl, deps.mods))
   }
   if (n <= 2) specs.push({ kind: 'alt-regal' }) // magic 1 prefix + 1 suffix
   specs.push({ kind: 'bench', benchMods })       // bench can land multiple
@@ -427,6 +430,13 @@ export function searchPlans(target: TargetSpec, deps: CraftDeps, buySide: BuySid
   const shell = (reason: string): MultiStepResult => ({ base: target.base, ilvl: target.ilvl, desired: target.desired, excluded: target.excluded ?? [], startKey, plans: [], cheapestPlan: null, buySide, verdict: { decision: 'unknown', confidence: 'low', rationale: reason }, search, notes: [reason] })
   if (abstract.length) return shell(`abstract target not supported — name the specific mod(s): ${abstract.map(a => a.label).join(', ')}. Specificity is the product.`)
   if (!base) return shell(`base item "${target.base}" not found in RePoE`)
+
+  // eldritch ⊥ influence: an item can't carry both — reject a target mixing the two classes.
+  const classes = new Set<string>()
+  for (const d of target.desired) for (const c of classifyMod(d, base, target.ilvl, deps.mods).classes) classes.add(c)
+  if (classes.has('influence') && classes.has('eldritch')) {
+    return shell('eldritch ⊥ influence — target mixes influence and eldritch mods, which cannot coexist on one item.')
+  }
 
   const startRemaining = target.desired.filter(d => !modPresent(start, d))
   let frontier: Node[] = [{ state: start, remaining: startRemaining, moves: [], accChaos: 0, accP90: 0, confidence: 'high', flags: new Set(), depth: 0 }]

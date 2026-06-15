@@ -154,9 +154,9 @@ const keepTryingStep = (name: string, p: number): PlanStepBlueprint =>
   ({ kind: 'keep-trying', label: name, p, consumable: { name, category: 'currency' }, qty: 1 })
 
 const TIER_POOL_FLAG =
-  'Pool = full (top "Exceptional" currency). Lower currency tiers (Lesser/Greater/Grand) roll a ' +
+  '⚠ Pool = full (top "Exceptional" currency). Lower currency tiers (Lesser/Greater/Grand) roll a ' +
   'SUBSET — cheaper per use but cannot reach the top value tiers; the currency→implicit-tier ' +
-  'mapping is not in the data export (flagged).'
+  'mapping is not in the data export (value-tier flagged).'
 
 /** CORE — roll a specific eldritch implicit (Exarch side = prefix-dominant, Eater = suffix-dominant). */
 function evalImplicit(state: ItemState, data: CraftDataContext, params: ModuleParams): ExpectedAttemptsResult {

@@ -37,6 +37,7 @@
     "validate:memory-strands": "tsx scripts/validate-memory-strands.mjs",
     "validate:solver": "tsx scripts/validate-solver.mjs",
     "validate:solver-multistep": "tsx scripts/validate-solver-multistep.mjs",
+    "validate:solver-producers": "tsx scripts/validate-solver-producers.mjs",
     "nnn:ladder": "tsx scripts/nnn-ladder.mjs",
     "smoke:rare": "tsx scripts/smoke-rare-pricing.mjs",
     "smoke:pob": "tsx scripts/smoke-pob.mjs",
