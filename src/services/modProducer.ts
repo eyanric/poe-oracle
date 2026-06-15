@@ -12,7 +12,7 @@
  * explicit yields ZERO specialized candidates (no false positives). The `eldritch ⊥ influence`
  * exclusion is enforced at the plan level by `classifyMod` (the solver rejects a target mixing them).
  *
- * ANOINT is an enchant-slot producer (data/anointRecipes seed table): an anoint target (a notable on
+ * ANOINT is an enchant-slot producer (data/anointRecipes, generated from poewiki Cargo): an anoint target (a notable on
  * an amulet) classifies to the `anoint` method with its fixed 3 oils — disjoint from the affix
  * producers. DEFERRED (seams, not built here): synthesis (the implicit pool is NOT in repoe-fork —
  * unclassifiable, so a synthesis target gets no specialized candidate ⇒ not guessed), catalyst (scales

@@ -5,8 +5,8 @@
  *
  * DIAGNOSIS: the notable→3-oil recipe table is NOT in any Code-fetchable export (PoB pob-data/poe1
  * has only Misc/Costs/ClusterJewels; the main repoe-fork base has no blight/oil/anoint file; PoB
- * computes anoints in code). It is Blight crafting data. So it lives as a hand-sourced SEED in
- * data/anointRecipes (populate from poedb). This validates the PRODUCER seam: an anointable-notable
+ * computes anoints in code). It is Blight crafting data. So the table is GENERATED from the poewiki
+ * Cargo data (npm run gen:anoints) into data/anointRecipes. This validates the PRODUCER seam: an anointable-notable
  * target → the anoint method with its fixed 3 oils, priced live; non-anointable → no candidate.
  * Analysis-only; read-only.
  */
@@ -36,7 +36,7 @@ console.log('  PoB pob-data/poe1/Misc.json   : present but monster/game constant
 console.log('  pob-data/poe1/*               : only Costs.json + ClusterJewels.json; Oils/Anoints/Notables → 404')
 console.log('  repoe-fork base               : blight_crafting_recipes/oils/anoints/enchantments → 404 (only cluster_jewel_notables = cluster data)')
 console.log('  PoB community repo            : no oil/anoint/blight data file (anoints computed in code)')
-console.log(`  ⇒ ABSENT from Code-fetchable exports → hand-sourced SEED in data/anointRecipes (${Object.keys(ANOINT_RECIPES).length} entry); populate from poedb`)
+console.log(`  ⇒ ABSENT from game exports → GENERATED from poewiki Cargo into data/anointRecipes (${Object.keys(ANOINT_RECIPES).length} recipes); refresh via npm run gen:anoints`)
 
 // ── classifyMod: an anointable notable on an amulet → the anoint producer ────────
 const target = { slot: 'prefix', modId: notable, label: notable, anoint: true }
@@ -81,4 +81,4 @@ const rt = resolveTargets(notable.toLowerCase(), amulet, ilvl, mods)
 console.log('\n--- resolveTargets (affix resolver) ---')
 console.log(`  "${notable}" → ${rt.length} affix candidate(s) (notables aren't affixes; the anoint target is named directly with anoint:true — a separate UI resolver, flagged follow-up)`)
 
-console.log('\n⚠ Recipe table is a hand-sourced SEED (not invented) — deterministic recipes ship low-confidence until verified. Producer is ready for the full poedb table.')
+console.log('\n⚠ Recipe table is GENERATED from poewiki Cargo (not invented/hand-typed) — deterministic recipes ship low-confidence until a sample is spot-checked vs the live game. Refresh per league via npm run gen:anoints.')

@@ -18,14 +18,15 @@
 import type { ItemState } from './itemState'
 import type { CraftModule, InputSet, ModuleParams, OutcomeDistribution } from './craftModule'
 import type { ExpectedAttemptsResult, PlanStepBlueprint } from './craftMethods'
-import { OIL_TIERS, ANOINT_RECIPES, type Oil } from '../data/anointRecipes'
+import { OIL_TIERS, ANOINT_ONLY_OILS, ANOINT_RECIPES, type Oil } from '../data/anointRecipes'
 
-// Oils + the notable→recipe table live in the data layer (data/anointRecipes); re-exported here
-// for the method-module surface. See that file for the sourcing diagnosis (the table is a seed).
-export { OIL_TIERS, ANOINT_RECIPES }
+// Oils + the notable→recipe table live in the data layer (data/anointRecipes, GENERATED from poewiki
+// Cargo); re-exported here for the method-module surface. See that file for the source + provenance.
+export { OIL_TIERS, ANOINT_ONLY_OILS, ANOINT_RECIPES }
 export type { Oil }
+const ALL_OILS: readonly string[] = [...OIL_TIERS, ...ANOINT_ONLY_OILS]
 const oilItem = (o: Oil): string => `${o} Oil`
-const isOil = (s: string): s is Oil => (OIL_TIERS as readonly string[]).includes(s)
+const isOil = (s: string): s is Oil => ALL_OILS.includes(s)
 
 const ANOINT_BASE_TAG = 'amulet'
 

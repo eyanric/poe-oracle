@@ -28,7 +28,7 @@ describe('anoint producer — classifyMod', () => {
     expect(ANOINT_RECIPES[NOTABLE]).toEqual(['Golden', 'Golden', 'Golden'])
   })
   it('a notable NOT in the table → no anoint candidate (no false positive)', () => {
-    const c = classifyMod({ slot: 'prefix', modId: 'Not A Real Anoint', label: 'x', anoint: true }, AMULET, 84, {})
+    const c = classifyMod({ slot: 'prefix', modId: 'Not A Real Anoint', anoint: true }, AMULET, 84, {})
     expect(c.classes.has('anoint')).toBe(false)
     expect(c.specs).toEqual([])
   })

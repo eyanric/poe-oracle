@@ -16,3 +16,6 @@ dist/
 
 # Local agent state
 .claude/
+
+# Generator raw-pull cache (poewiki Cargo) — polite local cache, not committed
+scripts/.cache/
