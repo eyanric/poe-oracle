@@ -1,18 +1,17 @@
 /**
- * services — Path Solver, increment 1: THE SPINE.
+ * services — Path Solver: THE SPINE (increment 1) + MULTI-STEP SEARCH (increment 2).
  *
  * The differentiator. The whole method library was built on a common interface so this can exist.
- * Increment 1 stands up the spine (target → state → applicable actions → goal test → risk-adjusted
- * cost ranking) and returns a CORRECT SHALLOW result: the cheapest risk-adjusted SINGLE modeled
- * method or ENCAPSULATED multi-stage recipe that reaches the target, with craft-vs-buy.
- *
- * ⚠ Multi-step cross-module sequence search is the NEXT increment — the spine is designed to support
- * it (canonical `stateKey` present, cost function compositional) but does NOT implement it here.
+ * Increment 1 (`solve`) ranks the cheapest risk-adjusted SINGLE method or ENCAPSULATED recipe.
+ * Increment 2 (`searchPlans`) turns that into a bounded branch-and-bound search over method
+ * SEQUENCES — scoped to PROTECT-THEN-PROCEED plans (build one side, lock it, roll the other), which
+ * reuses the protection in `itemState` so there is NO cross-step failure-reproduction (deferred to
+ * increment 3). The spine's single-method result is the depth-1 base case ⇒ no regression.
  *
  * Pure orchestration over the existing registry — no new mechanics. Reuses: CRAFT_MODULES /
- * evaluateMethod (action set), itemState (+ stateKey), modWeightIndex (producibility), estimateCraftCost
- * + craftRisk (cost/p50/p90/p95/brick), ladderCost (encapsulated recipe), rarePricing (specific-variant
- * buy-side). Clean-room; analysis/information only; manual-invoke.
+ * evaluateMethod (action set), itemState (+ stateKey + meta-lock protection), modWeightIndex
+ * (producibility), estimateCraftCost + craftRisk (cost/p50/p90/p95/brick), ladderCost (encapsulated
+ * recipe), rarePricing (specific-variant buy-side). Clean-room; analysis-only; manual-invoke.
  */
 import type { RepoeBaseItem } from '../data/repoe'
 import { getMods, getBaseItems, getEssences, getFossils, dedupeFossilsByName } from '../data/repoe'
@@ -20,13 +19,14 @@ import { getBenchOptions } from '../data/repoe'
 import { estimateCraftCost, type CraftDeps, type CraftCostEstimate, type MethodSpec, type BuySide } from './craftCost'
 import type { DesiredMod } from './craftMethods'
 import { normalizeBench } from './benchCrafting'
-import { newItemState, stateKey, type ItemState, type Slot } from './itemState'
+import { newItemState, stateKey, withAffix, withMeta, withBlockedGroup, RARITY_CAPS, type ItemState, type Slot } from './itemState'
 import { buildBaseModIndex, modRollProbability } from './modWeightIndex'
 import { evaluateLadder } from './ladderCost'
 import { pSlotSurviveNNN, RECOMBINATOR_COUNT_DIST } from './recombine'
 import { getEconomyProvider } from './EconomyProvider'
 import { resolveCurrentLeague } from './LeagueResolver'
 import { estimateRarePriceLive } from './rarePricing'
+import { searchEconomy } from './economySearch'
 import type { RiskCategory } from './craftRisk'
 
 /** A specific named mod — the shape the UI per-mod picker emits. No abstract "any T1". */
@@ -194,7 +194,7 @@ function divineOf(deps: CraftDeps): number | null {
   return m ? m.chaosEquivalent : null
 }
 
-function solverVerdict(cheapest: CandidatePath | null, buySide: BuySide | null): SolverVerdict {
+function solverVerdict(cheapest: { expectedChaos: number | null; p90: number | null; confidence: PathConfidence } | null, buySide: BuySide | null): SolverVerdict {
   if (!cheapest || cheapest.expectedChaos == null) return { decision: 'unknown', confidence: 'low', rationale: 'no costable craft path' }
   if (!buySide) return { decision: 'unknown', confidence: cheapest.confidence, rationale: 'no live buy-side price for the target variant' }
   const p90 = cheapest.p90 ?? cheapest.expectedChaos
@@ -236,8 +236,8 @@ export function solve(target: TargetSpec, deps: CraftDeps, buySide: BuySide | nu
   }
 }
 
-/** Live wrapper: load data + price the SPECIFIC-VARIANT buy-side (mod-filtered), then solve. */
-export async function solveLive(target: TargetSpec, league?: string): Promise<SolveResult> {
+/** Load deps + the SPECIFIC-VARIANT buy-side (mod-filtered trade, not baseline) — shared by both wrappers. */
+async function loadSolverContext(target: TargetSpec, league?: string): Promise<{ deps: CraftDeps; resolved: string; buySide: BuySide | null }> {
   const resolved = league ?? (await resolveCurrentLeague())
   const [mods, baseItems, essences, fossilsRaw, benchOptions] = await Promise.all([
     getMods(), getBaseItems(), getEssences(), getFossils(), getBenchOptions(),
@@ -245,7 +245,6 @@ export async function solveLive(target: TargetSpec, league?: string): Promise<So
   const snapshot = await getEconomyProvider().getEconomySnapshot(resolved)
   const deps: CraftDeps = { mods, baseItems, essences, fossils: dedupeFossilsByName(fossilsRaw), bench: normalizeBench(benchOptions, mods), snapshot, league: resolved }
 
-  // Specific-variant buy-side: price the required roll via mod-filtered trade (not the baseline).
   let buySide: BuySide | null = null
   const base = findBase(target.base, baseItems)
   if (base && target.desired.length) {
@@ -254,7 +253,12 @@ export async function solveLive(target: TargetSpec, league?: string): Promise<So
       buySide = { source: 'rare-comparables', label: `${base.name} with target mods`, lowChaos: est.range.low, medianChaos: est.range.median, confidence: est.confidence, tradeUrl: est.tradeUrl, unpricedMods: est.unpricedMods, note: `${est.range.count} comparable(s)` }
     }
   }
+  return { deps, resolved, buySide }
+}
 
+/** Live wrapper (increment 1): single-method/recipe ranking. */
+export async function solveLive(target: TargetSpec, league?: string): Promise<SolveResult> {
+  const { deps, resolved, buySide } = await loadSolverContext(target, league)
   const result = solve(target, deps, buySide)
   result.league = resolved
   result.stampDate = new Date().toISOString().slice(0, 10)
@@ -265,4 +269,207 @@ export async function solveLive(target: TargetSpec, league?: string): Promise<So
 export function canProduceByRoll(base: RepoeBaseItem, ilvl: number, target: SpecificMod, mods: Parameters<typeof buildBaseModIndex>[4]): boolean {
   const idx = buildBaseModIndex(base.name, base.item_class, new Set(base.tags), ilvl, mods)
   return modRollProbability(idx, { affix: target.slot, group: target.group, modId: target.modId }) > 0
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Increment 2 — MULTI-STEP SEARCH (protect-then-proceed)
+// ════════════════════════════════════════════════════════════════════════════════
+
+/** Search bounds (reported in the result). */
+export const SOLVER_DEPTH_CAP = 6
+export const SOLVER_BEAM_WIDTH = 64
+
+export type MoveKind = 'method' | 'recipe' | 'lock' | 'unlock' | 'scour'
+export interface PlanMove {
+  kind: MoveKind
+  label: string
+  chaos: number | null
+  /** Risk-adjusted (p90) for this step; deterministic steps ≈ chaos. */
+  p90: number | null
+  perAttemptProb: number
+  confidence: PathConfidence
+  flags: string[]
+  /** Desired mods this move lands (for method/recipe moves). */
+  produces?: SpecificMod[]
+  slot?: Slot
+}
+export interface Plan {
+  moves: PlanMove[]
+  expectedChaos: number | null
+  /** Conservative Σ of per-step p90 (the ranking metric). */
+  p90: number | null
+  rankChaos: number
+  confidence: PathConfidence
+  flags: string[]
+  depth: number
+}
+export interface MultiStepResult {
+  base: string
+  ilvl: number
+  league?: string
+  stampDate?: string
+  desired: SpecificMod[]
+  excluded: SpecificMod[]
+  startKey: string
+  plans: Plan[]
+  cheapestPlan: Plan | null
+  buySide: BuySide | null
+  verdict: SolverVerdict
+  search: { nodes: number; memoHits: number; pruned: number; depthCap: number; beamWidth: number }
+  notes: string[]
+}
+
+const REFORGE_KINDS = new Set(['alt-regal', 'chaos-spam', 'essence'])
+const isReforgeSpec = (s: MethodSpec): boolean => REFORGE_KINDS.has(s.kind)
+const minConf = (a: PathConfidence, b: PathConfidence): PathConfidence =>
+  a === 'low' || b === 'low' ? 'low' : a === 'medium' || b === 'medium' ? 'medium' : 'high'
+const modPresent = (s: ItemState, d: SpecificMod): boolean =>
+  s.affixes.some(a => a.slot === d.slot && (d.modId ? a.modId === d.modId : d.group ? a.group === d.group : false))
+const affixOf = (d: SpecificMod) => ({ slot: d.slot, group: d.group ?? d.modId ?? d.label, modId: d.modId ?? d.group ?? d.label })
+const asRare = (s: ItemState): ItemState => (s.rarity === 'rare' ? s : { ...s, rarity: 'rare', caps: { ...RARITY_CAPS.rare } })
+const priceOf = (deps: CraftDeps, name: string): number | null => { const m = searchEconomy(deps.snapshot, name, 'currency', 1)[0]; return m && m.chaosValue > 0 ? m.chaosValue : null }
+
+interface Node {
+  state: ItemState
+  remaining: SpecificMod[]
+  moves: PlanMove[]
+  accChaos: number
+  accP90: number
+  confidence: PathConfidence
+  flags: Set<string>
+  depth: number
+}
+const nodeKey = (n: Node): string => `${stateKey(n.state)}||${n.remaining.map(d => `${d.slot}:${d.group ?? d.modId}`).sort().join(',')}`
+
+/** A method move producing a desired subset on the current (open-slot-respecting) state. */
+function methodMove(target: TargetSpec, sub: SpecificMod[], spec: MethodSpec, deps: CraftDeps): { move: PlanMove } | null {
+  const cand = methodCandidate({ ...target, desired: sub }, spec, deps)
+  if (!cand.supported || !Number.isFinite(cand.rankChaos)) return null
+  return { move: { kind: 'method', label: cand.title, chaos: cand.expectedChaos, p90: cand.p90 ?? cand.expectedChaos, perAttemptProb: cand.perAttemptProb, confidence: cand.confidence, flags: cand.flags, produces: sub } }
+}
+
+/** Successor state after a method move lands `sub` (intended-outcome branch): add the mods to a rare item. */
+function applyProduce(state: ItemState, sub: SpecificMod[]): ItemState {
+  let s = asRare(state)
+  for (const d of sub) if (!modPresent(s, d)) s = withAffix(s, affixOf(d))
+  return s
+}
+
+function expand(node: Node, target: TargetSpec, base: RepoeBaseItem, deps: CraftDeps): Node[] {
+  const { state, remaining } = node
+  const remP = remaining.filter(d => d.slot === 'prefix')
+  const remS = remaining.filter(d => d.slot === 'suffix')
+  const present = target.desired.filter(d => modPresent(state, d))
+  const lockedP = !!state.meta.lockPrefixes, lockedS = !!state.meta.lockSuffixes
+  const unlockedPresent = present.filter(d => (d.slot === 'prefix' ? !lockedP : !lockedS))
+  const children: Node[] = []
+
+  const pushChild = (move: PlanMove, nextState: ItemState): void => {
+    if (move.chaos == null) return
+    const remainingAfter = target.desired.filter(d => !modPresent(nextState, d))
+    children.push({
+      state: nextState, remaining: remainingAfter, moves: [...node.moves, move],
+      accChaos: node.accChaos + move.chaos, accP90: node.accP90 + (move.p90 ?? move.chaos),
+      confidence: minConf(node.confidence, move.confidence), flags: new Set([...node.flags, ...move.flags]), depth: node.depth + 1,
+    })
+  }
+
+  // (a) produce-via-method: the whole remaining set (depth-1 completion) + each single affix side.
+  const subsets: SpecificMod[][] = [remaining]
+  if (remP.length && remS.length) { subsets.push(remP); subsets.push(remS) }
+  for (const sub of subsets) {
+    if (!sub.length) continue
+    for (const spec of methodSpecsFor({ ...target, desired: sub }, base, deps)) {
+      // a REFORGE would destroy any UNLOCKED present desired ⇒ skip (protection makes it safe → allowed).
+      if (isReforgeSpec(spec) && unlockedPresent.length) continue
+      const mm = methodMove(target, sub, spec, deps)
+      if (mm) pushChild(mm.move, applyProduce(state, sub))
+    }
+    // encapsulated recipe (NNN ladder) for this subset, when its shape matches.
+    const rec = nnnLadderRecipe({ ...target, desired: sub }, base, deps)
+    if (rec) pushChild({ kind: 'recipe', label: rec.title, chaos: rec.expectedChaos, p90: rec.expectedChaos, perAttemptProb: rec.perAttemptProb, confidence: rec.confidence, flags: rec.flags, produces: sub }, applyProduce(state, sub))
+  }
+
+  // (b) LOCK a fully-produced side so the other side can be rolled without destroying it.
+  const lockCraft = deps.bench?.meta.lockPrefixes
+  const lockCraftS = deps.bench?.meta.lockSuffixes
+  if (remP.length === 0 && remS.length > 0 && present.some(d => d.slot === 'prefix') && !lockedP && lockCraft) {
+    const c = (priceOf(deps, lockCraft.costName) ?? 0) * lockCraft.costAmount
+    pushChild({ kind: 'lock', label: 'lock prefixes (cannot be changed)', chaos: c, p90: c, perAttemptProb: 1, confidence: 'low', flags: ['⚠ bench/meta cost stale-flagged (RePoE pre-3.28)'], slot: 'prefix' }, withBlockGroups(withMeta(asRare(state), { lockPrefixes: true }), present.filter(d => d.slot === 'prefix')))
+  }
+  if (remS.length === 0 && remP.length > 0 && present.some(d => d.slot === 'suffix') && !lockedS && lockCraftS) {
+    const c = (priceOf(deps, lockCraftS.costName) ?? 0) * lockCraftS.costAmount
+    pushChild({ kind: 'lock', label: 'lock suffixes (cannot be changed)', chaos: c, p90: c, perAttemptProb: 1, confidence: 'low', flags: ['⚠ bench/meta cost stale-flagged (RePoE pre-3.28)'], slot: 'suffix' }, withBlockGroups(withMeta(asRare(state), { lockSuffixes: true }), present.filter(d => d.slot === 'suffix')))
+  }
+
+  // (c) SCOUR — reset to the base (enables a fresh re-roll). Memoization + b&b prevent it from looping.
+  if (state.affixes.length) {
+    const c = priceOf(deps, 'Orb of Scouring') ?? 1
+    pushChild({ kind: 'scour', label: 'Orb of Scouring (reset)', chaos: c, p90: c, perAttemptProb: 1, confidence: 'high', flags: [] }, newItemState({ base: base.name, itemClass: base.item_class, ilvl: target.ilvl, tags: base.tags, rarity: 'normal' }))
+  }
+  return children
+}
+
+const withBlockGroups = (s: ItemState, mods: SpecificMod[]): ItemState =>
+  mods.reduce((acc, d) => withBlockedGroup(acc, d.group ?? d.modId ?? d.label), s)
+
+/**
+ * Bounded branch-and-bound search over method SEQUENCES (protect-then-proceed). Memoized on
+ * `(stateKey, remaining)`; beam-limited frontier; depth cap. Returns ranked complete plans.
+ */
+export function searchPlans(target: TargetSpec, deps: CraftDeps, buySide: BuySide | null = null): MultiStepResult {
+  const notes: string[] = []
+  const abstract = target.desired.filter(d => !isSpecific(d))
+  const base = findBase(target.base, deps.baseItems)
+  const start = target.start ?? (base ? newItemState({ base: base.name, itemClass: base.item_class, ilvl: target.ilvl, tags: base.tags, rarity: 'normal' }) : newItemState({ base: target.base, itemClass: 'unknown', ilvl: target.ilvl }))
+  const startKey = stateKey(start)
+  const search = { nodes: 0, memoHits: 0, pruned: 0, depthCap: SOLVER_DEPTH_CAP, beamWidth: SOLVER_BEAM_WIDTH }
+  const shell = (reason: string): MultiStepResult => ({ base: target.base, ilvl: target.ilvl, desired: target.desired, excluded: target.excluded ?? [], startKey, plans: [], cheapestPlan: null, buySide, verdict: { decision: 'unknown', confidence: 'low', rationale: reason }, search, notes: [reason] })
+  if (abstract.length) return shell(`abstract target not supported — name the specific mod(s): ${abstract.map(a => a.label).join(', ')}. Specificity is the product.`)
+  if (!base) return shell(`base item "${target.base}" not found in RePoE`)
+
+  const startRemaining = target.desired.filter(d => !modPresent(start, d))
+  let frontier: Node[] = [{ state: start, remaining: startRemaining, moves: [], accChaos: 0, accP90: 0, confidence: 'high', flags: new Set(), depth: 0 }]
+  const visited = new Map<string, number>()
+  const complete: Plan[] = []
+  let best = Infinity // best complete plan's accP90 (branch-and-bound bound)
+
+  while (frontier.length) {
+    const next: Node[] = []
+    for (const node of frontier) {
+      if (node.accP90 >= best) { search.pruned++; continue } // b&b
+      const key = nodeKey(node)
+      const seen = visited.get(key)
+      if (seen != null && seen <= node.accP90) { search.memoHits++; continue } // memoization
+      visited.set(key, node.accP90)
+      search.nodes++
+      if (node.remaining.length === 0) { // complete plan
+        const plan: Plan = { moves: node.moves, expectedChaos: node.accChaos, p90: node.accP90, rankChaos: node.accP90, confidence: node.confidence, flags: [...node.flags], depth: node.depth }
+        complete.push(plan)
+        best = Math.min(best, node.accP90)
+        continue
+      }
+      if (node.depth >= SOLVER_DEPTH_CAP) continue
+      for (const child of expand(node, target, base, deps)) if (child.accP90 < best) next.push(child)
+    }
+    // beam: keep the cheapest B frontier nodes.
+    frontier = next.sort((a, b) => a.accP90 - b.accP90).slice(0, SOLVER_BEAM_WIDTH)
+  }
+
+  const plans = complete.sort((a, b) => a.rankChaos - b.rankChaos)
+  const cheapestPlan = plans[0] ?? null
+  if (!plans.length) notes.push('no protected single/multi-step plan reaches this target on the core method set (specialized methods + unprotected reproduction are increment 3).')
+  if (cheapestPlan?.confidence === 'low') notes.push('⚠ cheapest plan rests on flagged low-confidence magnitudes — not authoritative; see flags.')
+  notes.push(`searched ${search.nodes} nodes (memo hits ${search.memoHits}, pruned ${search.pruned}); protect-then-proceed only — unprotected cross-step reproduction is increment 3 (returned plans are a safe upper bound).`)
+
+  return { base: target.base, ilvl: target.ilvl, desired: target.desired, excluded: target.excluded ?? [], startKey, plans, cheapestPlan, buySide, verdict: solverVerdict(cheapestPlan, buySide), search, notes }
+}
+
+/** Live wrapper (increment 2): multi-step ranked plans + specific-variant craft-vs-buy. */
+export async function searchPlansLive(target: TargetSpec, league?: string): Promise<MultiStepResult> {
+  const { deps, resolved, buySide } = await loadSolverContext(target, league)
+  const result = searchPlans(target, deps, buySide)
+  result.league = resolved
+  result.stampDate = new Date().toISOString().slice(0, 10)
+  return result
 }
