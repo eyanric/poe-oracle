@@ -1,25 +1,28 @@
 # Report — real-export `parse_pob` validation
 
-**Date:** 2026-06-16 · **Status:** 🟢 **first real export validated — 3 parser bugs found & fixed.** Corpus = 1 real build so far (Eric's); needs ~5–7 more for the full archetype spread. Gates green (typecheck ✓ · lint ✓ · 400 tests ✓ · build ✓).
+**Date:** 2026-06-16 · **Status:** 🟢 **6-build real corpus validated — 5 parser bugs found & fixed.** All 6 cross-check clean (every PoB `<PlayerStat>` == our value). Gates green (typecheck ✓ · lint ✓ · 418 tests ✓ · build ✓).
 
 The crux: a PoB export embeds PoB's **own computed stats** (`<PlayerStat stat value/>`). The validation
 ground-truths our extracted Life/ES/DPS/resist against those — not "did it parse." **Validating one real
 export immediately exposed three bugs the hand-built fixtures never could** — exactly the point of the
 increment.
 
-## Bugs found & fixed (the real export earned its keep)
+## Bugs found & fixed (the real corpus earned its keep)
 
-The first real build (`0mLsHPwVEPfp`, Scion/Ascendant, CI/1-life) exposed:
+Five parser/harness bugs the hand-built fixtures could never expose, each found by a real build:
 
-| # | Bug | Cause | Fix (commit) |
+| # | Bug | Cause | Build that exposed it / fix |
 |---|---|---|---|
-| 1 | stat cross-check matched **0** stats (vacuously passed) | the harness regex assumed `stat="…" value="…"` order; real exports write **value-first** | `fix(pob-validate): order-independent PlayerStat cross-check` |
-| 2 | every item parsed with **0 mods** | PoB's **export** item format ≠ in-game clipboard — no `--------` dividers; mods sit after an `Implicits: N` marker with `{crafted}`/`{fractured}`/`{range:…}` tags | `fix(pob): parse PoB-export item mods…` — `extractPobItemMods` (everything after `Implicits:`, tags stripped) → **0 → 239 mods** |
-| 3 | every item `itemLevel = 0` | `Item Level: N` is inline (no `----`), so the clipboard parser missed it | same commit — inline `Item Level:` extraction → all 33 items now have ilvl |
-| + | influence not surfaced | — | same commit — `influences` from the export's `X Item` lines (5 items labelled, e.g. Beast Jack = Shaper+Redeemer) |
+| 1 | stat cross-check matched **0** stats (vacuously passed) | the harness regex assumed `stat="…" value="…"` order; real exports write **value-first** | `0mLsHPwVEPfp` · `fix(pob-validate): order-independent PlayerStat cross-check` |
+| 2 | every item parsed with **0 mods** | PoB's **export** item format ≠ in-game clipboard — no `--------` dividers; mods after an `Implicits: N` marker with `{crafted}`/`{fractured}`/`{range:…}` tags | `0mLsHPwVEPfp` · `extractPobItemMods` (after `Implicits:`, tags stripped) → **0 → 239 mods** |
+| 3 | every item `itemLevel = 0` | `Item Level: N` inline (no `----`) | `0mLsHPwVEPfp` · inline `Item Level:` extraction |
+| 4 | multi-set builds parsed the **wrong skills** | `parseSkills` hardcoded `sets[0]`; leveling-guide builds carry many `<SkillSet>`s, active = `activeSkillSet` | `3rvtvz8dq0tc` (Slayer main read as a leveling skill) · `fix(pob): read the ACTIVE skill set…` |
+| 5 | **no main skill** when `mainSocketGroup` points at an empty header group | the designated group held only annotation text | `QeQhGat81YVJ` (RF build, `<< Damage Skills >>` divider) · fall back to first group with an active gem |
+| + | influence not surfaced | — | `influences` from `X Item` lines (e.g. Beast Jack = Shaper+Redeemer) |
 
-All additive — the existing clipboard-format fixtures are untouched (the new path is gated on an `Implicits:`
-line), so **parity holds, no snapshot churn**. New regression test (`pobRealExport.test.ts`) asserts the crux.
+All additive — existing clipboard-format fixtures untouched (new path gated on `Implicits:`; single-set builds
+unchanged), so **parity holds, no snapshot churn**. Regression nets: `pobRealExport.test.ts` (the detailed
+0mLsHPwVEPfp assertions) + `pobCorpus.test.ts` (data-driven over every `fixtures/real/*.txt`).
 
 ## ⚠ What I need from you (to finish the corpus)
 
@@ -69,17 +72,17 @@ mod stacks, 1-life CI, FullDPS keys). That's exactly what the real corpus is for
 
 ## Per-build validation table
 
-| Build | archetype | parse | identity | stat X-check | items/mods | tree | notes |
-|---|---|---|---|---|---|---|---|
-| `0mLsHPwVEPfp` | Scion CI/1-life, Smite of Divine Judgement | ✓ | Scion/Ascendant L100 ✓ | **✓ 94/94 PlayerStats == PoB** (Life 1, ES 9916, Armour 1.05M, DPS 112M) | ✓ 33 items, 239 mods, 5 influenced | ✓ 136 nodes | exposed bugs #1–3 (now fixed); FullDPS=0 on this build (PoB reports TotalDPS/CombinedDPS — surfaced) |
-| _spell caster_ | — | ⏳ awaiting code | | | | | |
-| _attack (bow/melee)_ | — | ⏳ | | | | | |
-| _minion_ | — | ⏳ | | | | | |
-| _low-life / MoM_ | — | ⏳ | | | | | |
-| _cluster / dense tree_ | — | ⏳ | | | | | |
-| _crafted-gear-heavy_ | — | ⏳ | | | | | |
+| Build | archetype | parse | identity | stat X-check | items/mods | notes |
+|---|---|---|---|---|---|---|
+| `0mLsHPwVEPfp` | Scion CI/1-life (Smite of Divine Judgement) | ✓ | Scion/Ascendant L100 | **✓ 94/94** (Life 1, ES 9916, Armour 1.05M, DPS 112M) | 33 / 239 (5 influenced) | exposed bugs #1–3 |
+| `h-si3kweTn_N` | Ranger/Deadeye attack (Kinetic Blast) | ✓ | Ranger/Deadeye L98 | **✓ 98/98** (Life 3776, ES 1627, Eva 16016, DPS 12.5M) | 62 / 332 | bow/attack shape |
+| `3rvtvz8dq0tc` | Duelist/Slayer attack (Ground Slam of Earthshaking) | ✓ | Duelist/Slayer L100 | **✓ 100/100** (Life 5091, Armour 12335, DPS 46M) | 74 / 323 | exposed bug #4 (active skill set) |
+| `MpDjiqpnP2sV` | Templar/Hierophant spell (Kinetic Fusillade) | ✓ | Templar/Hierophant L94 | **✓ 96/96** (Life 4470, ES 1535, DPS 7.9M) | 59 / 288 | 16 tree specs (deep progression) |
+| `Hmlt9phwV-hw` | Templar/Hierophant spell (Shock Nova) | ✓ | Templar/Hierophant L100 | **✓ 93/93** (Life 3626, ES 5218, Mana 8373, DPS 5.3M) | **166 / 1068** | very high item/mod count |
+| `QeQhGat81YVJ` | Marauder/Chieftain (Righteous Fire) | ✓ | Marauder/Chieftain L100 | **✓ 97/97** (Life 8334, Armour 13009, CombinedDPS 3.35M) | 139 / 756 | exposed bug #5; RF → TotalDPS 58 vs CombinedDPS 3.35M (both surfaced) |
 
-_(0mLsHPwVEPfp already covers the CI/ES + crafted-gear shapes — 33 items, crafted/influenced mods.)_
+Archetype spread covered: CI/ES · bow + melee attack · spell · RF/degen · high-item-count · deep
+multi-set progression · crafted/influenced gear. (A dedicated minion build would round it out — optional.)
 
 ## Notes / next
 
