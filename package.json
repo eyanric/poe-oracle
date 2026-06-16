@@ -49,6 +49,7 @@
     "nnn:ladder": "tsx scripts/nnn-ladder.mjs",
     "smoke:rare": "tsx scripts/smoke-rare-pricing.mjs",
     "smoke:pob": "tsx scripts/smoke-pob.mjs",
+    "validate:pob": "tsx scripts/validate-pob.mjs",
     "gen:anoints": "tsx scripts/gen-anoints.mjs",
     "gen:synthesis": "tsx scripts/gen-synthesis.mjs",
     "make:pob-fixtures": "node scripts/make-pob-fixtures.mjs",
