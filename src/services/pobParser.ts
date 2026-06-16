@@ -122,8 +122,34 @@ export interface PobItem {
   baseType: string
   itemLevel: number
   mods: string[]
+  /** Influence(s) on the item (Shaper/Elder/Conqueror/Eldritch) — from the export's `X Item` lines. */
+  influences?: string[]
   raw: string
 }
+
+const POB_INFLUENCES = ['Shaper', 'Elder', 'Warlord', 'Hunter', 'Redeemer', 'Crusader', 'Searing Exarch', 'Eater of Worlds']
+
+/**
+ * PoB EXPORT item format ≠ the in-game clipboard format: it has no `--------` section dividers, uses
+ * `Implicits: N` then the mod lines (with `{crafted}`/`{fractured}`/`{range:…}` tag prefixes), and
+ * embeds metadata (Unique ID, *BasePercentile, `X Item` influence flags). Extract the mods directly —
+ * everything after the `Implicits: N` marker, tags stripped. Returns null for the clipboard format.
+ */
+function extractPobItemMods(raw: string): string[] | null {
+  const lines = raw.split('\n').map(l => l.trim())
+  const implIdx = lines.findIndex(l => /^Implicits:\s*\d+/i.test(l))
+  if (implIdx < 0) return null
+  const mods: string[] = []
+  for (const line of lines.slice(implIdx + 1)) {
+    const m = line.replace(/^(\{[^}]*\}\s*)+/, '').trim() // drop {crafted}/{fractured}/{range:…}/{tags:…}
+    if (!m || /^(Corrupted|Mirrored|Split|Synthesised Item|Fractured Item)$/i.test(m)) continue
+    mods.push(m)
+  }
+  return mods.length ? mods : null
+}
+
+const extractInfluences = (raw: string): string[] =>
+  POB_INFLUENCES.filter(inf => new RegExp(`^${inf} Item$`, 'm').test(raw))
 
 export interface PobTreeSpec {
   title?: string
@@ -206,17 +232,21 @@ function parseItems(root: XmlNode): PobItem[] {
     const raw = it.text.trim()
     if (!raw) continue
     const parsed = parseClipboardItemText(raw)
-    // Merge every captured mod line — ItemParser can route short mod sections to
-    // implicits, but for a PoB item we want all of them (incl. enchants/crafts).
-    const mods = [...new Set([...parsed.affixMods, ...parsed.implicitMods, ...parsed.enchantMods])]
+    // PoB EXPORT format (Implicits: N, no `----`) → extract directly; else the clipboard parse.
+    // Merge every captured mod line — for a PoB item we want all of them (incl. enchants/crafts).
+    const mods = extractPobItemMods(raw) ?? [...new Set([...parsed.affixMods, ...parsed.implicitMods, ...parsed.enchantMods])]
+    const influences = extractInfluences(raw)
+    // PoB export has `Item Level: N` without the `----` dividers the clipboard parser needs.
+    const itemLevel = parsed.itemLevel || Number((raw.match(/^Item Level:\s*(\d+)/m) ?? [])[1]) || 0
     items.push({
       id: it.attrs.id ?? '',
       slot: it.attrs.id ? slotByItemId.get(it.attrs.id) : undefined,
       rarity: parsed.rarity,
       name: parsed.name,
       baseType: parsed.baseType,
-      itemLevel: parsed.itemLevel,
+      itemLevel,
       mods,
+      influences: influences.length ? influences : undefined,
       raw,
     })
   }
