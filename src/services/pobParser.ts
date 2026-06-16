@@ -191,9 +191,11 @@ function parseGem(g: XmlNode): PobGem {
 function parseSkills(root: XmlNode): { groups: PobSkillGroup[]; mainSkill?: string } {
   const skills = find(root, 'Skills')
   if (!skills) return { groups: [] }
-  // Skills may nest groups under a <SkillSet>; handle both flat and set-wrapped.
+  // Skills may nest groups under a <SkillSet>; handle both flat and set-wrapped. Builds with leveling
+  // guides carry MANY sets — use the ACTIVE one (`activeSkillSet` → matching `id`), not the first.
   const sets = findAll(skills, 'SkillSet')
-  const container = sets.length ? sets[0] : skills
+  const activeId = skills.attrs.activeSkillSet
+  const container = sets.find(s => s.attrs.id === activeId) ?? sets[0] ?? skills
   const mainGroupIdx = numAttr(find(root, 'Build') ?? root, 'mainSocketGroup')
 
   const groups: PobSkillGroup[] = []
@@ -207,8 +209,14 @@ function parseSkills(root: XmlNode): { groups: PobSkillGroup[]; mainSkill?: stri
       gems,
     })
   })
-  const mainGroup = groups.find(g => g.main) ?? groups[0]
-  const mainSkill = mainGroup?.gems.find(g => !g.support)?.name
+  // Main skill = the designated group's first active (non-support) gem. Some builds point
+  // `mainSocketGroup` at an empty header/annotation group — fall back to the first group that
+  // actually holds an active skill (enabled first) rather than reporting none.
+  const activeGem = (g?: PobSkillGroup): string | undefined => g?.gems.find(x => !x.support)?.name
+  const mainSkill =
+    activeGem(groups.find(g => g.main)) ??
+    activeGem(groups.find(g => g.enabled && g.gems.some(x => !x.support))) ??
+    activeGem(groups.find(g => g.gems.some(x => !x.support)))
   return { groups, mainSkill }
 }
 
