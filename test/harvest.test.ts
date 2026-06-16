@@ -29,8 +29,9 @@ const params = (craft: 'reforge' | 'augment' | 'remove'): ModuleParams => ({ des
 describe('Harvest data (3.28)', () => {
   it('maps life → Wild lifeforce and exposes confirmed/low confidence', () => {
     expect(LIFEFORCE_BY_TAG.life).toBe('Wild')
-    expect(harvestCraft('reforge', 'fire')?.costConfidence).toBe('confirmed') // 50 Wild
-    expect(harvestCraft('reforge', 'life')?.costConfidence).toBe('low') // amount unconfirmed
+    expect(harvestCraft('reforge', 'fire')?.costConfidence).toBe('confirmed') // 50 Wild (Cargo)
+    expect(harvestCraft('reforge', 'life')).toMatchObject({ amount: 75, costConfidence: 'confirmed' }) // Cargo-confirmed
+    expect(harvestCraft('remove', 'life')?.costConfidence).toBe('low') // no standalone remove craft in Cargo
     expect(harvestCraft('augment', 'life')).toMatchObject({ colour: 'Wild', amount: 17500, sacred: 1 })
   })
 })
@@ -78,7 +79,7 @@ describe('Harvest module on the interface', () => {
   })
 
   it('Crystallised Rancour reforge (Mirage) is league-gated + folds Rancour into the step cost', () => {
-    expect(harvestCraft('reforge', 'minion')).toMatchObject({ league: 'Mirage', colour: 'Primal', amount: 200, rancour: 3, costConfidence: 'low' })
+    expect(harvestCraft('reforge', 'minion')).toMatchObject({ league: 'Mirage', colour: 'Primal', amount: 200, rancour: 3, costConfidence: 'confirmed' })
 
     const mirage = harvestModule.evaluate([rare()] as InputSet, dataMirage, rancourParams)
     expect(mirage.supported).toBe(true)

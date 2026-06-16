@@ -1,17 +1,16 @@
 /**
  * data layer — Harvest craft set + lifeforce mechanics (CURRENT 3.28 iteration).
  *
- * ⚠ FRESHNESS — Harvest is the most version-volatile method. There is NO machine-readable
- * export (RePoE has no harvest file; poewiki/poedb 403 to automated fetch), so this is a
- * CURATED dataset transcribed from current 3.28 community sources (Maxroll Harvest crafting
- * guide + poe.ninja lifeforce categories), 2026-06-14. What it reflects:
- *   - Current iteration = spend coloured Lifeforce (Vivid/Primal/Wild + Sacred) on recipes
- *     at the Sacred Grove / Horticrafting station. The old "reforge keeping prefixes/suffixes"
- *     crafts are GONE; the forcing craft is now "add a [tag] mod and remove a random other".
- *   - Lifeforce colour → mod-tag mapping is from Maxroll's reforge table (authoritative).
- *   - Per-craft lifeforce AMOUNTS are the low-confidence part: only a subset were confirmed
- *     verbatim; the rest are representative and flagged `costConfidence: 'low'`. Lifeforce is
- *     live-priceable (poe.ninja trades each colour) — amounts × live price flow through economy.
+ * ⚠ FRESHNESS — Harvest is the most version-volatile method. The reforge/augment SET + amounts are
+ * now confirmed against poewiki Cargo `harvest_crafting_options` (browser-UA fetch, 2026-06-16 sweep —
+ * see docs/reports/validation-sweep.md). What it reflects:
+ *   - Current iteration = spend coloured Lifeforce (Vivid/Primal/Wild + Sacred) on recipes at the
+ *     Sacred Grove / Horticrafting station. The old "reforge keeping prefixes/suffixes" crafts are GONE;
+ *     the forcing craft is "add a [tag] mod and remove a random other".
+ *   - Lifeforce colour → mod-tag mapping: CONFIRMED against the Cargo per-craft colour costs.
+ *   - Per-craft lifeforce AMOUNTS: now CONFIRMED from Cargo (reforge 50/75/100/150 by tag; augment
+ *     15000/17500/20000 + 1 Sacred). Lifeforce is live-priceable (poe.ninja) — amounts × live price flow
+ *     through economy. Only the standalone `remove` craft stays flagged (not present in the Cargo set).
  *
  * Consume DATA (game facts), not GPL code. Pure module (static tables).
  */
@@ -81,19 +80,20 @@ export const RANCOUR_TAGS = Object.keys(RANCOUR_REFORGE)
 const colourOf = (tag: string): LifeforceColour => LIFEFORCE_BY_TAG[tag] ?? 'Wild'
 
 // Reforge-with-[tag]: reroll all mods, ≥1 guaranteed of [tag]. Cheap.
-// Confirmed verbatim (Maxroll): fire/cold/lightning 50, chaos 100. Others representative.
-const REFORGE_AMOUNT: Record<string, { amount: number; confidence: 'confirmed' | 'low' }> = {
-  fire: { amount: 50, confidence: 'confirmed' }, cold: { amount: 50, confidence: 'confirmed' },
-  lightning: { amount: 50, confidence: 'confirmed' }, chaos: { amount: 100, confidence: 'confirmed' },
+// ALL amounts confirmed from poewiki Cargo `harvest_crafting_options` (2026-06-16).
+const REFORGE_AMOUNT: Record<string, number> = {
+  fire: 50, cold: 50, lightning: 50, physical: 50,
+  attack: 75, life: 75, caster: 75, defence: 75,
+  chaos: 100,
+  critical: 150, speed: 150,
 }
 // Add-a-[tag]-and-remove-a-random-other (the forcing/augment craft): N colour + 1 Sacred.
-// Confirmed (Maxroll): Fire/Phys/Attack 15000; Life/Defence/Caster/Critical 17500; Speed 20000.
+// ALL amounts confirmed from poewiki Cargo `harvest_crafting_options` (2026-06-16).
 const AUGMENT_AMOUNT: Record<string, number> = {
-  fire: 15000, physical: 15000, attack: 15000,
-  life: 17500, defence: 17500, caster: 17500, critical: 17500,
-  speed: 20000, cold: 15000, lightning: 15000, chaos: 15000,
+  fire: 15000, cold: 15000, lightning: 15000, physical: 15000,
+  attack: 17500, life: 17500, caster: 17500, defence: 17500, chaos: 17500,
+  critical: 20000, speed: 20000,
 }
-const AUGMENT_CONFIRMED = new Set(['fire', 'physical', 'attack', 'life', 'defence', 'caster', 'critical', 'speed'])
 
 export const HARVEST_TAGS = Object.keys(HARVEST_TAG_TO_MODTAG)
 
@@ -105,24 +105,28 @@ export function harvestCraft(kind: HarvestCraftKind, tag: string): HarvestCraft 
   if (t in RANCOUR_REFORGE) {
     if (kind !== 'reforge') return null
     const r = RANCOUR_REFORGE[t]
-    return { kind, tag: t, colour: r.colour, amount: r.amount, rancour: r.rancour, league: MIRAGE_LEAGUE, costConfidence: 'low' }
+    // amounts confirmed from Cargo (vivid/primal 200 + 2–3 Rancour); availability is Mirage-gated.
+    return { kind, tag: t, colour: r.colour, amount: r.amount, rancour: r.rancour, league: MIRAGE_LEAGUE, costConfidence: 'confirmed' }
   }
   const colour = colourOf(t)
   if (kind === 'reforge') {
-    const r = REFORGE_AMOUNT[t] ?? { amount: 75, confidence: 'low' as const }
-    return { kind, tag: t, colour, amount: r.amount, costConfidence: r.confidence }
+    const amount = REFORGE_AMOUNT[t]
+    return { kind, tag: t, colour, amount: amount ?? 75, costConfidence: amount != null ? 'confirmed' : 'low' }
   }
   if (kind === 'augment') {
-    return { kind, tag: t, colour, amount: AUGMENT_AMOUNT[t] ?? 17500, sacred: 1, costConfidence: AUGMENT_CONFIRMED.has(t) ? 'confirmed' : 'low' }
+    const amount = AUGMENT_AMOUNT[t]
+    return { kind, tag: t, colour, amount: amount ?? 17500, sacred: 1, costConfidence: amount != null ? 'confirmed' : 'low' }
   }
-  // remove [tag] — amounts not confirmed from a current source; representative + flagged.
+  // ⚠ remove [tag] — NO standalone "remove a random X" craft in the current Cargo set (removal is
+  // bundled into the augment "add and remove another"). Representative + flagged; verify if needed.
   return { kind, tag: t, colour, amount: 30, costConfidence: 'low' }
 }
 
 export const HARVEST_PROVENANCE =
-  'Curated 2026-06-14 from Maxroll 3.28 Harvest guide + poe.ninja lifeforce categories. ' +
-  'Colour→tag mapping confirmed; reforge fire/cold/lightning(50)/chaos(100) + augment ' +
-  'Fire/Phys/Attack(15000)/Life/Defence/Caster/Critical(17500)/Speed(20000)+1 Sacred confirmed; ' +
-  'other amounts representative (costConfidence:"low"). No "reforge keeping prefixes/suffixes" (removed). ' +
-  'Crystallised Rancour (Mirage-only) reforges minion(200 Primal+3)/attribute(200 Vivid+2)/mana(200 Primal+2) ' +
-  'from a single community source (u4n) — UNVERIFIED vs in-game, low-confidence.'
+  'Confirmed 2026-06-16 against poewiki Cargo harvest_crafting_options (validation sweep). ' +
+  'Colour→tag mapping confirmed; reforge amounts fire/cold/lightning/physical(50), attack/life/caster/' +
+  'defence(75), chaos(100), critical/speed(150); augment fire/cold/lightning/physical(15000), attack/life/' +
+  'caster/defence/chaos(17500), critical/speed(20000)+1 Sacred — all Cargo-confirmed. No "reforge keeping ' +
+  'prefixes/suffixes" (removed). Crystallised Rancour (Mirage-only) reforges minion(200 Primal+3)/' +
+  'attribute(200 Vivid+2)/mana(200 Primal+2) — amounts Cargo-confirmed; availability Mirage-gated. ' +
+  'Standalone "remove [tag]" craft NOT in the current Cargo set (removal bundled into augment) — flagged.'
