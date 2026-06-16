@@ -36,6 +36,7 @@
     "validate:anoint-producer": "tsx scripts/validate-anoint-producer.mjs",
     "validate:veiled": "tsx scripts/validate-veiled.mjs",
     "validate:synthesis": "tsx scripts/validate-synthesis.mjs",
+    "validate:synthesis-pool": "tsx scripts/validate-synthesis-pool.mjs",
     "validate:memory-strands": "tsx scripts/validate-memory-strands.mjs",
     "validate:solver": "tsx scripts/validate-solver.mjs",
     "validate:solver-multistep": "tsx scripts/validate-solver-multistep.mjs",
@@ -48,6 +49,7 @@
     "smoke:rare": "tsx scripts/smoke-rare-pricing.mjs",
     "smoke:pob": "tsx scripts/smoke-pob.mjs",
     "gen:anoints": "tsx scripts/gen-anoints.mjs",
+    "gen:synthesis": "tsx scripts/gen-synthesis.mjs",
     "make:pob-fixtures": "node scripts/make-pob-fixtures.mjs",
     "dryrun:league": "tsx scripts/dryrun-league-start-3.28.mjs",
     "check": "npm run typecheck && npm run lint && npm test"

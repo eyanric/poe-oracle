@@ -36,7 +36,7 @@ describe('synthesise module (Harvest transform)', () => {
       { name: 'Vivid Crystallised Lifeforce', qty: 5000, category: 'currency' },
       { name: 'Sacred Crystallised Lifeforce', qty: 1, category: 'currency' },
     ])
-    expect(r.notes.join(' ')).toMatch(/POOL is NOT in the repoe-fork export/i) // data-gap flagged
+    expect(r.notes.join(' ')).toMatch(/UNIFORM|no spawn weights|sourced from poewiki/i) // pool sourced; weights absent (flagged)
   })
   it('rejects an influenced input', () => {
     const r = evaluateMethod(ring({ influence: ['elder'] }), data, { desired: [], method: { kind: 'synthesise' } })

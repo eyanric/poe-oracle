@@ -75,6 +75,8 @@ export interface ItemState {
   /** Amulet anoint — a notable in the ENCHANT slot (one per item). Separate from prefix/suffix
    *  affixes: it does not consume affix capacity and is not reachable by affix-rolling methods. */
   anoint?: string
+  /** Synthesised-item IMPLICIT mod ids (the implicit slot, distinct from prefix/suffix affixes). */
+  synthImplicits?: string[]
   resources: ItemResources
 }
 
@@ -98,6 +100,7 @@ export interface NewItemStateInput {
   quality?: number
   corrupted?: boolean
   anoint?: string
+  synthImplicits?: string[]
   resources?: ItemResources
 }
 
@@ -119,6 +122,7 @@ export function newItemState(i: NewItemStateInput): ItemState {
     quality: i.quality ?? 0,
     corrupted: i.corrupted,
     anoint: i.anoint,
+    synthImplicits: i.synthImplicits,
     resources: i.resources ?? {},
   }
 }
@@ -157,6 +161,10 @@ export const withMeta = (s: ItemState, patch: MetaModsState): ItemState => ({ ..
 /** Set the amulet anoint (enchant slot — replaces any existing anoint; does not touch affixes). */
 export const withAnoint = (s: ItemState, notable: string): ItemState => ({ ...s, anoint: notable })
 
+/** Add a synthesised-item implicit (implicit slot — does not touch prefix/suffix affixes). */
+export const withSynthImplicit = (s: ItemState, modId: string): ItemState =>
+  (s.synthImplicits ?? []).includes(modId) ? s : { ...s, synthImplicits: [...(s.synthImplicits ?? []), modId] }
+
 /** Deplete a per-item resource (clamped at 0). */
 export function consumeResource(s: ItemState, key: string, amount = 1): ItemState {
   const current = s.resources[key] ?? 0
@@ -178,6 +186,6 @@ export function stateKey(s: ItemState): string {
     s.base, s.itemClass, s.ilvl, s.rarity, affixes,
     [...s.blockedGroups].sort().join(','), meta,
     [...s.influence].sort().join(','), [...s.fractured].sort().join(','),
-    s.quality, s.corrupted ? 'C' : '', s.catalyst ?? '', s.anoint ?? '', res,
+    s.quality, s.corrupted ? 'C' : '', s.catalyst ?? '', s.anoint ?? '', [...(s.synthImplicits ?? [])].sort().join(','), res,
   ].join('#')
 }

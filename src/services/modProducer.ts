@@ -27,10 +27,11 @@ import { buildEldritchIndex, ELDRITCH_BASE_TAGS } from './eldritch'
 import { buildVeiledPool } from './veiled'
 import { resolveBaseModIndex, modRollProbability } from './modWeightIndex'
 import { isAnointableNotable } from '../data/anointRecipes'
+import { isSynthesisImplicit, synthesisPoolSize } from '../data/synthesisImplicits'
 
 /** Minimal target-mod shape (structurally compatible with the solver's SpecificMod). */
-export interface ProducerMod { slot: Slot; group?: string; modId?: string; anoint?: boolean }
-export type ModClass = 'influence' | 'eldritch' | 'veiled' | 'anoint' | 'core'
+export interface ProducerMod { slot: Slot; group?: string; modId?: string; anoint?: boolean; synthImplicit?: boolean }
+export type ModClass = 'influence' | 'eldritch' | 'veiled' | 'anoint' | 'synthesis' | 'core'
 export interface Classification { classes: Set<ModClass>; specs: MethodSpec[] }
 
 const matches = (e: { modId: string; group: string }, mod: ProducerMod): boolean =>
@@ -48,7 +49,7 @@ export function clearModProducerCache(): void { cache.clear() }
  * single mod — that disjointness is what the plan-level `eldritch ⊥ influence` guard relies on.
  */
 export function classifyMod(mod: ProducerMod, base: RepoeBaseItem, ilvl: number, mods: Record<string, RepoeMod>): Classification {
-  const key = `${base.name}|${ilvl}|${mod.slot}|${mod.modId ?? mod.group ?? '?'}|${mod.anoint ? 'A' : ''}`
+  const key = `${base.name}|${ilvl}|${mod.slot}|${mod.modId ?? mod.group ?? '?'}|${mod.anoint ? 'A' : ''}${mod.synthImplicit ? 'S' : ''}`
   const hit = cache.get(key)
   if (hit) return hit
   const tags = new Set(base.tags)
@@ -64,6 +65,20 @@ export function classifyMod(mod: ProducerMod, base: RepoeBaseItem, ilvl: number,
     const notable = mod.modId ?? mod.group
     if (notable && base.tags.includes('amulet') && isAnointableNotable(notable)) {
       classes.add('anoint'); specs.push({ kind: 'anoint', notable })
+    }
+    if (!classes.size) classes.add('core')
+    const r: Classification = { classes, specs }
+    cache.set(key, r)
+    return r
+  }
+
+  // SYNTHESIS — a synthesised-item IMPLICIT (not a prefix/suffix). Classifies ONLY against the per-class
+  // pool (data/synthesisImplicits, from poewiki Cargo): the modId must be a synthesis implicit obtainable
+  // on this base's item class. The producer is the Vivid Vulture reroll (keep-trying for the target);
+  // P = 1/poolSize (synthesis implicits have no spawn weights — verified). Non-pool ⇒ no candidate.
+  if (mod.synthImplicit) {
+    if (mod.modId && isSynthesisImplicit(base.item_class, mod.modId)) {
+      classes.add('synthesis'); specs.push({ kind: 'synthesis-reroll', poolSize: synthesisPoolSize(base.item_class) })
     }
     if (!classes.size) classes.add('core')
     const r: Classification = { classes, specs }
