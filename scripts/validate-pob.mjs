@@ -39,9 +39,11 @@ async function fetchPobbIn(id) {
 export function statCrossCheck(code) {
   const xml = decodePobCode(code)
   const raw = {}
-  for (const m of xml.matchAll(/<PlayerStat\s+stat="([^"]+)"\s+value="([^"]*)"\s*\/?>/g)) {
-    const v = Number(m[2])
-    if (Number.isFinite(v)) raw[m[1]] = v
+  // PoB writes attributes in EITHER order (real exports use value-first) — parse by name, not position.
+  for (const m of xml.matchAll(/<PlayerStat\b([^>]*?)\/?>/g)) {
+    const stat = (m[1].match(/\bstat="([^"]*)"/) || [])[1]
+    const v = Number((m[1].match(/\bvalue="([^"]*)"/) || [])[1])
+    if (stat && Number.isFinite(v)) raw[stat] = v
   }
   const parsed = parsePob(xml)
   const mismatches = []
