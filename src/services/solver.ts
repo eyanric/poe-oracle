@@ -27,7 +27,7 @@ import { getEconomyProvider } from './EconomyProvider'
 import { resolveCurrentLeague } from './LeagueResolver'
 import { estimateRarePriceLive } from './rarePricing'
 import { searchEconomy } from './economySearch'
-import { modProducers, classifyMod } from './modProducer'
+import { modProducers, classifyMod, resolveTargets, type TargetCandidate, type ModDomain } from './modProducer'
 import { respectsLock, blockedOnLockedItem } from './lockMatrix'
 import type { RiskCategory } from './craftRisk'
 
@@ -584,4 +584,112 @@ export async function searchPlansLive(target: TargetSpec, league?: string): Prom
   result.league = resolved
   result.stampDate = new Date().toISOString().slice(0, 10)
   return result
+}
+
+// ── Query surface: resolve (stat → identity) → pick → solve (the shared front door) ──
+
+/** A target a caller can express as a human stat `query` OR a pinned identity (modId/group/+flags). */
+export interface QueryTarget {
+  query?: string
+  slot?: Slot
+  group?: string
+  modId?: string
+  label?: string
+  minTier?: number
+  /** Pin the domain to cut ambiguity (e.g. only the `influence` identity of a shared stat). */
+  domain?: ModDomain
+  anoint?: boolean
+  synthImplicit?: boolean
+}
+export interface QueryCraftSpec { base: string; ilvl: number; desired: QueryTarget[]; excluded?: QueryTarget[] }
+
+export interface ResolveTargetsResult { base: string; ilvl: number; league: string; query: string; candidates: TargetCandidate[] }
+
+/** Live wrapper for `resolveTargets` — stat/group query → candidate identities on a base (the picker entry point). */
+export async function resolveTargetsLive(query: string, baseName: string, ilvl: number, league?: string): Promise<ResolveTargetsResult> {
+  const resolved = league ?? (await resolveCurrentLeague())
+  const [mods, baseItems] = await Promise.all([getMods(), getBaseItems()])
+  const base = findBase(baseName, baseItems)
+  return { base: base?.name ?? baseName, ilvl, league: resolved, query, candidates: base ? resolveTargets(query, base, ilvl, mods) : [] }
+}
+
+interface Ambiguity { query: string; candidates: TargetCandidate[] }
+export type QuerySolveResult =
+  | { kind: 'solved'; result: MultiStepResult }
+  | { kind: 'disambiguation'; base: string; ilvl: number; league: string; ambiguities: Ambiguity[]; message: string }
+  | { kind: 'unresolved'; base: string; ilvl: number; league: string; unresolved: string[]; message: string }
+
+const firstLine = (s: string): string => s.split('\n')[0].trim()
+/** Distinct-identity key: synthesis is modId-keyed (each tier a separate reroll target); else domain|group. */
+const identityKey = (c: TargetCandidate): string => (c.domain === 'synthImplicit' ? `synth|${c.modId}` : `${c.domain}|${c.group}`)
+
+/** Map a resolved candidate (one identity, possibly several tiers) to a solver `SpecificMod`. */
+function candidateToSpec(cands: TargetCandidate[], minTier?: number): SpecificMod {
+  const c = cands[0]
+  const label = firstLine(c.label)
+  if (c.domain === 'anoint') return { slot: c.slot, modId: c.modId, label, anoint: true }
+  if (c.domain === 'synthImplicit') return { slot: c.slot, modId: c.modId, label, synthImplicit: true }
+  // explicit / influence / veiled / eldritch — target the GROUP (any tier; minTier widens "tier-or-better").
+  return { slot: c.slot, group: c.group, label, minTier }
+}
+
+export type QueryResolution = { kind: 'spec'; spec: SpecificMod } | { kind: 'ambiguous'; candidates: TargetCandidate[] } | { kind: 'unresolved' }
+
+/** Resolve ONE query target → a pinned spec, an ambiguity (multiple identities), or unresolved.
+ *  Pure (no I/O) — the disambiguation decision the front door + UI picker share. */
+export function resolveQueryTarget(t: QueryTarget, base: RepoeBaseItem, ilvl: number, mods: CraftDeps['mods']): QueryResolution {
+  // Pinned identity (no query) — pass through as a SpecificMod (the existing modId-keyed path).
+  if (!t.query) {
+    if (!t.modId && !t.group) return { kind: 'unresolved' }
+    return { kind: 'spec', spec: { slot: t.slot ?? 'prefix', group: t.group, modId: t.modId, label: t.label ?? t.modId ?? t.group ?? '?', minTier: t.minTier, anoint: t.anoint, synthImplicit: t.synthImplicit } }
+  }
+  const all = resolveTargets(t.query, base, ilvl, mods)
+  if (!all.length) return { kind: 'unresolved' }
+  // anoint/synthesis occupy the enchant/implicit slot, not an affix slot — so a bare affix query
+  // defaults to the affix domains, and those producer slots are OPT-IN (pin `domain`). This avoids
+  // making every "+life" query ambiguous, without ever picking between same-slot affix identities.
+  const isAffix = (c: TargetCandidate): boolean => c.domain !== 'anoint' && c.domain !== 'synthImplicit'
+  const affix = all.filter(isAffix)
+  const pool = t.domain ? all.filter(c => c.domain === t.domain) : affix.length ? affix : all
+  if (!pool.length) return { kind: 'unresolved' }
+  const ids = new Map<string, TargetCandidate[]>()
+  for (const c of pool) (ids.get(identityKey(c)) ?? ids.set(identityKey(c), []).get(identityKey(c))!).push(c)
+  if (ids.size === 1) return { kind: 'spec', spec: candidateToSpec([...ids.values()][0], t.minTier) }
+  return { kind: 'ambiguous', candidates: pool }
+}
+
+/**
+ * The front door: turn a craft request whose targets may be human stat queries into a solved plan —
+ * OR, when a stat maps to several distinct identities (a Hunter implicit vs a same-stat explicit), a
+ * DISAMBIGUATION response listing the candidates (never guessing which the user meant). Unambiguous
+ * stats and pinned modIds proceed straight to `searchPlans`. Mirrors the UI picker's resolve→pick→solve.
+ */
+export async function solveCraftQuery(input: QueryCraftSpec, league?: string): Promise<QuerySolveResult> {
+  const resolved = league ?? (await resolveCurrentLeague())
+  const [mods, baseItems] = await Promise.all([getMods(), getBaseItems()])
+  const base = findBase(input.base, baseItems)
+  if (!base) return { kind: 'unresolved', base: input.base, ilvl: input.ilvl, league: resolved, unresolved: [input.base], message: `base item "${input.base}" not found in RePoE` }
+
+  const desired: SpecificMod[] = []
+  const excluded: SpecificMod[] = []
+  const ambiguities: Ambiguity[] = []
+  const unresolved: string[] = []
+  for (const [list, out] of [[input.desired, desired], [input.excluded ?? [], excluded]] as const) {
+    for (const t of list) {
+      const r = resolveQueryTarget(t, base, input.ilvl, mods)
+      if (r.kind === 'spec') out.push(r.spec)
+      else if (r.kind === 'ambiguous') ambiguities.push({ query: t.query!, candidates: r.candidates })
+      else unresolved.push(t.query ?? t.label ?? t.modId ?? t.group ?? '?')
+    }
+  }
+  if (ambiguities.length) {
+    return { kind: 'disambiguation', base: base.name, ilvl: input.ilvl, league: resolved, ambiguities,
+      message: 'Ambiguous target(s): a stat maps to multiple distinct mod identities (different domains/tiers are different crafts). Re-call solve_craft with the chosen modId (or pin `domain`/`minTier`).' }
+  }
+  if (unresolved.length) {
+    return { kind: 'unresolved', base: base.name, ilvl: input.ilvl, league: resolved, unresolved,
+      message: `Could not resolve to any mod identity on ${base.name}: ${unresolved.join(', ')}. Check the stat text, base, or ilvl.` }
+  }
+  const result = await searchPlansLive({ base: base.name, ilvl: input.ilvl, desired, excluded }, resolved)
+  return { kind: 'solved', result }
 }

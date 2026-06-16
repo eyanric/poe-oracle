@@ -6,6 +6,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { registerEconomyTools } from './tools/economy'
 import { registerAppraiseTool, registerPriceCheckItemTool, registerWatchTool } from './tools/appraise'
 import { registerCraftCostTool, registerRecombineTool, registerSolveCraftTool } from './tools/craft'
+import { registerResolveTargetTool } from './tools/query'
 import { registerLeagueStartTools } from './tools/leagueStart'
 import { registerPobTools } from './tools/pob'
 import { registerOptionalTools } from './optional/index'
@@ -24,6 +25,7 @@ export function createPoeMcpServer(): McpServer {
   registerWatchTool(server)
   registerCraftCostTool(server)
   registerRecombineTool(server)
+  registerResolveTargetTool(server)
   registerSolveCraftTool(server)
   registerLeagueStartTools(server)
   registerPobTools(server)

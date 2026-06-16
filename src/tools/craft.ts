@@ -8,7 +8,7 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { estimateCraftCostLive, estimateRecombineLive, type CraftSpec, type CraftCostEstimate, type MethodSpec, type RecombineInput, type RecombineEstimate } from '../services/craftCost'
 import type { DesiredMod } from '../services/craftMethods'
-import { searchPlansLive, type TargetSpec, type MultiStepResult, type SpecificMod } from '../services/solver'
+import { solveCraftQuery, type QueryCraftSpec, type QueryTarget, type QuerySolveResult, type MultiStepResult } from '../services/solver'
 
 const slotEnum = z.enum(['prefix', 'suffix'])
 
@@ -119,11 +119,17 @@ const recombineItem = z.object({
 
 // ── solve_craft (path solver, increment 1 — single-method/recipe ranked spine) ──
 
-const specificModSchema = z.object({
-  slot: slotEnum,
-  group: z.string().optional().describe('Mod group, e.g. "IncreasedLife".'),
-  modId: z.string().optional().describe('Specific RePoE mod id (a named mod at a tier).'),
-  label: z.string().describe('Human label, e.g. "maximum Life".'),
+const domainEnum = z.enum(['explicit', 'eldritch-implicit', 'veiled', 'influence', 'anoint', 'synthImplicit'])
+const queryTargetSchema = z.object({
+  query: z.string().optional().describe('Human stat / group / notable, e.g. "maximum Life" or "Whispers of Doom". Resolved via resolve_target; an ambiguous one returns candidates instead of solving.'),
+  modId: z.string().optional().describe('Pinned RePoE mod id (a named mod at a tier) — used directly, no resolution.'),
+  group: z.string().optional().describe('Mod group, e.g. "IncreasedLife" (any tier).'),
+  slot: slotEnum.optional().describe('Affix slot (nominal for anoint/synthesis). Defaults to prefix.'),
+  label: z.string().optional().describe('Human label for display.'),
+  minTier: z.number().optional().describe('Tier floor (1 = best). "tier-or-better" — widens an exact target.'),
+  domain: domainEnum.optional().describe('Pin the domain to cut ambiguity (e.g. only the influence identity).'),
+  anoint: z.boolean().optional().describe('Pinned: the modId is an amulet anoint notable.'),
+  synthImplicit: z.boolean().optional().describe('Pinned: the modId is a synthesised-item implicit.'),
 })
 
 export function registerSolveCraftTool(server: McpServer): void {
@@ -132,28 +138,44 @@ export function registerSolveCraftTool(server: McpServer): void {
     {
       title: 'Solve craft (cheapest risk-adjusted PLAN + craft-vs-buy)',
       description:
-        'Given a target (base, ilvl, specific desired/excluded mods), search modeled crafting methods + ' +
-        'encapsulated recipes for the cheapest RISK-ADJUSTED multi-step PLAN that reaches it — including ' +
-        'PROTECT-THEN-PROCEED sequences (build one side, lock it, roll the other) via branch-and-bound. Each ' +
-        'plan: ordered moves, expected/p90 cost, success probability, propagated low-confidence flags, and a ' +
-        'craft-vs-buy verdict vs the live price of the SPECIFIC-VARIANT item. Deterministic-cheap-first: a ' +
-        'benchable mod resolves to the bench craft (depth-1), never a padded sequence. Specific named mods only ' +
-        '(abstract "any T1" rejected). ⚠ Protected plans only — unprotected cross-step reproduction + ' +
-        'specialized methods are the next increment (returned plans are a safe upper bound). Read-only.',
+        'Given a target (base, ilvl, desired/excluded mods — each a human stat `query` OR a pinned modId), ' +
+        'search modeled crafting methods + producers + encapsulated recipes for the cheapest RISK-ADJUSTED ' +
+        'multi-step PLAN that reaches it — incl. PROTECT-THEN-PROCEED sequences via branch-and-bound. A stat ' +
+        'query is resolved to its identity; if it maps to MULTIPLE identities (a Hunter implicit vs a same-stat ' +
+        'explicit are different crafts) the response is a DISAMBIGUATION listing the candidates — it never ' +
+        'guesses. Each solved plan: ordered moves, expected/p90 cost, success P, propagated low-confidence ' +
+        'flags, and a craft-vs-buy verdict vs the live SPECIFIC-VARIANT price. Deterministic-cheap-first. ' +
+        'Producers covered: core/influence/eldritch/veiled/anoint/synthesis. Read-only.',
       inputSchema: {
         base: z.string().describe('Base item name, e.g. "Vaal Regalia".'),
         ilvl: z.number().describe('Item level.'),
-        desired: z.array(specificModSchema).describe('Specific named mods the result must have.'),
-        excluded: z.array(specificModSchema).optional().describe('Specific named mods the result must NOT have.'),
+        desired: z.array(queryTargetSchema).describe('Mods the result must have — each a stat query or a pinned modId.'),
+        excluded: z.array(queryTargetSchema).optional().describe('Mods the result must NOT have.'),
         league: z.string().optional().describe('League name. Defaults to the current challenge league.'),
       },
     },
     async ({ base, ilvl, desired, excluded, league }) => {
-      const target: TargetSpec = { base, ilvl, desired: desired as SpecificMod[], excluded: excluded as SpecificMod[] | undefined }
-      const result = await searchPlansLive(target, league)
-      return { content: [{ type: 'text', text: renderSolve(result) }], structuredContent: result as unknown as Record<string, unknown> }
+      const spec: QueryCraftSpec = { base, ilvl, desired: desired as QueryTarget[], excluded: excluded as QueryTarget[] | undefined }
+      const res = await solveCraftQuery(spec, league)
+      return { content: [{ type: 'text', text: renderQuerySolve(res) }], structuredContent: res as unknown as Record<string, unknown> }
     },
   )
+}
+
+function renderQuerySolve(res: QuerySolveResult): string {
+  if (res.kind === 'solved') return renderSolve(res.result)
+  if (res.kind === 'unresolved') {
+    return [`**solve_craft — ${res.base} (ilvl ${res.ilvl})** · ${res.league}`, '', `⚠ ${res.message}`].join('\n')
+  }
+  // disambiguation — present candidates per ambiguous query; do NOT solve.
+  const lines: string[] = [`**solve_craft — DISAMBIGUATION NEEDED** · ${res.base} (ilvl ${res.ilvl}) · ${res.league}`, '', res.message, '']
+  for (const a of res.ambiguities) {
+    lines.push(`**"${a.query}"** → ${a.candidates.length} identities:`, '| modId | domain | slot | tier | label |', '|---|---|---|---|---|')
+    for (const c of a.candidates.slice(0, 16)) lines.push(`| ${c.modId} | ${c.domain}${c.influence ? `:${c.influence}` : ''} | ${c.slot} | ${c.tier ?? '—'} | ${(c.label || '').replace(/\n/g, ' / ').slice(0, 40)} |`)
+    lines.push('')
+  }
+  lines.push('_Re-call solve_craft with the chosen `modId` (or pin `domain`/`minTier`) for each ambiguous target._')
+  return lines.join('\n')
 }
 
 function renderSolve(r: MultiStepResult): string {

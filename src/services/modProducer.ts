@@ -26,8 +26,8 @@ import { buildInfluenceIndex, INFLUENCES, type Influence } from './influence'
 import { buildEldritchIndex, ELDRITCH_BASE_TAGS } from './eldritch'
 import { buildVeiledPool } from './veiled'
 import { resolveBaseModIndex, modRollProbability } from './modWeightIndex'
-import { isAnointableNotable } from '../data/anointRecipes'
-import { isSynthesisImplicit, synthesisPoolSize } from '../data/synthesisImplicits'
+import { isAnointableNotable, ANOINT_RECIPES } from '../data/anointRecipes'
+import { isSynthesisImplicit, synthesisPoolSize, SYNTHESIS_POOL } from '../data/synthesisImplicits'
 
 /** Minimal target-mod shape (structurally compatible with the solver's SpecificMod). */
 export interface ProducerMod { slot: Slot; group?: string; modId?: string; anoint?: boolean; synthImplicit?: boolean }
@@ -121,14 +121,14 @@ export function modProducers(mod: ProducerMod, base: RepoeBaseItem, ilvl: number
 
 // ── stat/group → candidate modIds (the disambiguation contract for the UI picker) ──
 
-export type ModDomain = 'explicit' | 'eldritch-implicit' | 'veiled' | 'influence'
+export type ModDomain = 'explicit' | 'eldritch-implicit' | 'veiled' | 'influence' | 'anoint' | 'synthImplicit'
 /** A concrete mod IDENTITY for a stat/group on a base — a distinct (modId, domain, tier). */
 export interface TargetCandidate {
   modId: string
   group: string
   /** The mod's roll text (tier-specific) — the display + tier-exact pricing label. */
   label: string
-  slot: Slot // explicit/veiled/influence: the affix; eldritch: side (exarch=prefix, eater=suffix)
+  slot: Slot // explicit/veiled/influence: the affix; eldritch: side; anoint/synthImplicit: nominal (enchant/implicit slot)
   domain: ModDomain
   influence?: Influence
   /** Tier (1 = best). Doubles as the floor HANDLE: a caller passes this as a target's `minTier`
@@ -171,6 +171,19 @@ export function resolveTargets(query: string, base: RepoeBaseItem, ilvl: number,
   for (const inf of INFLUENCES) {
     const ii = buildInfluenceIndex(tags, inf, ilvl, mods)
     for (const e of [...ii.prefixes, ...ii.suffixes]) if (textHit(e, q)) add({ modId: e.modId, group: e.group, label: e.text ?? e.group, slot: e.affix, domain: 'influence', influence: inf, weight: e.weight })
+  }
+  // anoint — a notable in the amulet enchant slot (matched by notable NAME, not an affix pool)
+  if (base.tags.includes('amulet')) {
+    for (const notable of Object.keys(ANOINT_RECIPES)) {
+      if (notable.toLowerCase().includes(q)) add({ modId: notable, group: notable, label: notable, slot: 'prefix', domain: 'anoint', weight: 0 })
+    }
+  }
+  // synthesis implicit — the per-item-class pool (implicit slot); text from the repoe mod entry
+  for (const modId of SYNTHESIS_POOL[base.item_class]?.mods ?? []) {
+    const m = mods[modId]
+    if (m && textHit({ group: m.groups?.[0] ?? modId, text: m.text }, q)) {
+      add({ modId, group: m.groups?.[0] ?? modId, label: m.text ?? modId, slot: 'prefix', domain: 'synthImplicit', weight: 0 })
+    }
   }
   return out
 }

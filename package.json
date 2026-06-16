@@ -44,6 +44,7 @@
     "validate:solver-reproduction": "tsx scripts/validate-solver-reproduction.mjs",
     "validate:lock-matrix": "tsx scripts/validate-lock-matrix.mjs",
     "validate:modid-targeting": "tsx scripts/validate-modid-targeting.mjs",
+    "validate:query-surface": "tsx scripts/validate-query-surface.mjs",
     "validate:tier-floor": "tsx scripts/validate-tier-floor.mjs",
     "nnn:ladder": "tsx scripts/nnn-ladder.mjs",
     "smoke:rare": "tsx scripts/smoke-rare-pricing.mjs",
