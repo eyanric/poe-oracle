@@ -1,14 +1,34 @@
 # Report — real-export `parse_pob` validation
 
-**Date:** 2026-06-16 · **Status:** ⏸ **blocked on corpus sourcing** — harness built + verified on existing fixtures; needs ~6–8 real PoB codes (see "What I need"). Gates green (typecheck ✓ · lint ✓ · 395 tests ✓ · build ✓).
+**Date:** 2026-06-16 · **Status:** 🟢 **first real export validated — 3 parser bugs found & fixed.** Corpus = 1 real build so far (Eric's); needs ~5–7 more for the full archetype spread. Gates green (typecheck ✓ · lint ✓ · 400 tests ✓ · build ✓).
 
 The crux: a PoB export embeds PoB's **own computed stats** (`<PlayerStat stat value/>`). The validation
-ground-truths our extracted Life/ES/DPS/resist against those — not "did it parse." The harness + cross-check
-are built and proven on the existing fixtures; the **real, diverse corpus is the missing piece**.
+ground-truths our extracted Life/ES/DPS/resist against those — not "did it parse." **Validating one real
+export immediately exposed three bugs the hand-built fixtures never could** — exactly the point of the
+increment.
 
-## ⚠ What I need from you (sourcing is blocked)
+## Bugs found & fixed (the real export earned its keep)
 
-I could not autonomously assemble a real current-league corpus. What I found:
+The first real build (`0mLsHPwVEPfp`, Scion/Ascendant, CI/1-life) exposed:
+
+| # | Bug | Cause | Fix (commit) |
+|---|---|---|---|
+| 1 | stat cross-check matched **0** stats (vacuously passed) | the harness regex assumed `stat="…" value="…"` order; real exports write **value-first** | `fix(pob-validate): order-independent PlayerStat cross-check` |
+| 2 | every item parsed with **0 mods** | PoB's **export** item format ≠ in-game clipboard — no `--------` dividers; mods sit after an `Implicits: N` marker with `{crafted}`/`{fractured}`/`{range:…}` tags | `fix(pob): parse PoB-export item mods…` — `extractPobItemMods` (everything after `Implicits:`, tags stripped) → **0 → 239 mods** |
+| 3 | every item `itemLevel = 0` | `Item Level: N` is inline (no `----`), so the clipboard parser missed it | same commit — inline `Item Level:` extraction → all 33 items now have ilvl |
+| + | influence not surfaced | — | same commit — `influences` from the export's `X Item` lines (5 items labelled, e.g. Beast Jack = Shaper+Redeemer) |
+
+All additive — the existing clipboard-format fixtures are untouched (the new path is gated on an `Implicits:`
+line), so **parity holds, no snapshot churn**. New regression test (`pobRealExport.test.ts`) asserts the crux.
+
+## ⚠ What I need from you (to finish the corpus)
+
+**The fetch path works** — you supplied `pobb.in/0mLsHPwVEPfp` and `npm run validate:pob -- 0mLsHPwVEPfp`
+fetched, validated, and (after the fixes) it's a committed regression fixture. I just need **~5–7 more
+pobb.in ids** across the remaining archetypes (spell caster · attack bow/melee · minion · low-life/MoM ·
+cluster/dense tree) to complete the spread. Send the ids; I run them through the same path.
+
+Why I couldn't self-source the rest:
 
 - **pobb.in is reachable** (200, no User-Agent block) and the **raw endpoint works**: `https://pobb.in/<id>/raw`
   returns the code (verified — invalid ids 404 with JSON, so valid ids return the export). The fetch path is
@@ -47,11 +67,19 @@ Both hand-built fixtures cross-check clean — the logic is sound. **These are s
 the real-world shapes the brief targets** (CDATA, nested SkillSets/ItemSets, dense trees, crafted/influenced
 mod stacks, 1-life CI, FullDPS keys). That's exactly what the real corpus is for.
 
-## Per-build validation table (awaiting corpus)
+## Per-build validation table
 
-_To be filled when the codes land — one row per real build: parse ✓/✗ · stat-match ✓/✗ (worst delta) ·
-items/mods ✓/✗ · tree ✓/✗ · notes. Any output-changing parser fix will cite the build + field that exposed
-it (old→new), each its own commit._
+| Build | archetype | parse | identity | stat X-check | items/mods | tree | notes |
+|---|---|---|---|---|---|---|---|
+| `0mLsHPwVEPfp` | Scion CI/1-life, Smite of Divine Judgement | ✓ | Scion/Ascendant L100 ✓ | **✓ 94/94 PlayerStats == PoB** (Life 1, ES 9916, Armour 1.05M, DPS 112M) | ✓ 33 items, 239 mods, 5 influenced | ✓ 136 nodes | exposed bugs #1–3 (now fixed); FullDPS=0 on this build (PoB reports TotalDPS/CombinedDPS — surfaced) |
+| _spell caster_ | — | ⏳ awaiting code | | | | | |
+| _attack (bow/melee)_ | — | ⏳ | | | | | |
+| _minion_ | — | ⏳ | | | | | |
+| _low-life / MoM_ | — | ⏳ | | | | | |
+| _cluster / dense tree_ | — | ⏳ | | | | | |
+| _crafted-gear-heavy_ | — | ⏳ | | | | | |
+
+_(0mLsHPwVEPfp already covers the CI/ES + crafted-gear shapes — 33 items, crafted/influenced mods.)_
 
 ## Notes / next
 
