@@ -55,13 +55,19 @@ const ENTITIES: Record<string, string> = {
   '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&apos;': "'", '&nbsp;': ' ',
 }
 
-/** Minimal HTML → text: list items become bullets, block tags become line breaks. */
+/** Sentinel marking a real HTML heading (`<h1-6>`) so the parser can use it as a section boundary
+ *  on live forum pages, instead of the plain-text "non-bullet line = header" heuristic (which a
+ *  multi-line `<li>` or a Table-of-Contents `<ul>` would otherwise shatter into junk sections). */
+export const HDR_MARK = String.fromCharCode(1)
+
+/** Minimal HTML → text: headings → sentinel-marked lines, list items → bullets, blocks → line breaks. */
 export function stripHtml(input: string): string {
   if (!input.includes('<')) return input
   let s = input
+  s = s.replace(/<h[1-6][^>]*>/gi, `\n${HDR_MARK}`).replace(/<\/h[1-6]>/gi, '\n')
   s = s.replace(/<li[^>]*>/gi, '\n- ').replace(/<\/li>/gi, '\n')
   s = s.replace(/<br\s*\/?>/gi, '\n')
-  s = s.replace(/<\/(p|div|h[1-6]|tr|ul|ol)>/gi, '\n')
+  s = s.replace(/<\/(p|div|tr|ul|ol)>/gi, '\n')
   s = s.replace(/<[^>]+>/g, '')
   s = s.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
   for (const [ent, ch] of Object.entries(ENTITIES)) s = s.split(ent).join(ch)
@@ -76,7 +82,8 @@ function sectionCategory(header: string): PrimaryCategory {
   const h = header.toLowerCase()
   if (/\b(skill|gem)s?\b/.test(h) || /support/.test(h)) return 'skill'
   if (/unique/.test(h)) return 'unique'
-  if (/\b(currency|economy)\b/.test(h)) return 'currency'
+  // live notes title the currency section "Item Changes" (the fixture used "Currency").
+  if (/\b(currency|economy)\b/.test(h) || /\bitem changes?\b/.test(h)) return 'currency'
   if (/\b(atlas|map|league|mechanic|endgame|ascendanc|breach|delve|ritual|scarab|keepers)\b/.test(h)) return 'mechanic'
   return 'other'
 }
@@ -118,7 +125,25 @@ export function parsePatchNotes(raw: string, opts: ParseOptions = {}): ParsedPat
   let current: PatchSection | null = null
   let sawTitle = false
 
+  // Live forum HTML carries real <h*> headings (sentinel-marked by stripHtml). When present, use ONLY
+  // those as section boundaries and treat every other line as content — so a multi-line <li> or the
+  // page's Table-of-Contents <ul> can't fabricate junk sections. Plain text (the fixture) has no
+  // sentinels and keeps the "non-bullet line = header" heuristic, byte-for-byte unchanged.
+  const htmlMode = allLines.some(l => l.startsWith(HDR_MARK))
+
   for (const line of allLines) {
+    if (htmlMode) {
+      if (line.startsWith(HDR_MARK)) {
+        current = { header: line.slice(HDR_MARK.length).trim(), lines: [] }
+        sections.push(current)
+      } else {
+        const t = line.replace(BULLET, '').trim()
+        if (!t) continue
+        if (!current) { current = { header: '(preamble)', lines: [] }; sections.push(current) }
+        current.lines.push(t)
+      }
+      continue
+    }
     const isBullet = BULLET.test(line)
     if (!isBullet) {
       // First non-bullet line that carries the version is the title — skip it.

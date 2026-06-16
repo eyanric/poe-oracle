@@ -54,6 +54,7 @@
     "gen:synthesis": "tsx scripts/gen-synthesis.mjs",
     "make:pob-fixtures": "node scripts/make-pob-fixtures.mjs",
     "dryrun:league": "tsx scripts/dryrun-league-start-3.28.mjs",
+    "validate:track-b": "tsx scripts/validate-track-b.mjs",
     "check": "npm run typecheck && npm run lint && npm test"
   },
   "dependencies": {

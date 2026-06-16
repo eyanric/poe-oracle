@@ -88,3 +88,32 @@ describe('stripHtml', () => {
     expect(has(parsedHtml.categories.currency, /Exalted Orbs > Chaos/)).toBe(true)
   })
 })
+
+describe('live forum HTML hardening (<h*> headings, ToC, multi-line <li>)', () => {
+  // Mirrors the real GGG forum structure that shattered the plain-text heuristic: a Table-of-Contents
+  // <ul> of links, real <h3> section headings, a multi-line <li> (<br/>), and the live currency header
+  // "Item Changes" (the fixture used "Currency").
+  const html = [
+    '<h3>Table of Contents</h3><ul><li><a href="#a">The Mirage Challenge League</a></li><li><a href="#b">Item Changes</a></li></ul>',
+    '<h3>The Mirage Challenge League</h3><ul><li>Zones can now contain a Mirage portal<br/>leading to an astral copy of the area.</li></ul>',
+    '<h3>Skill Gem Changes</h3><ul><li>Divine Blast: Project a beam of holy light.</li><li>Blessed Call Support: triggers on block.</li></ul>',
+    '<h3>Item Changes</h3><ul><li>Currency Items now account for a larger portion of drops.</li><li>Exalted and Regal Orbs will now be comparatively more common.</li></ul>',
+  ].join('\n')
+  const p = parsePatchNotes(stripHtml(html), { league: 'Mirage', version: '3.28.0' })
+
+  it('uses <h*> headings as section boundaries — no junk "-" sections from ToC / multi-line <li>', () => {
+    const headers = p.sections.map(s => s.header)
+    expect(headers).toContain('Skill Gem Changes')
+    expect(headers).toContain('Item Changes')
+    expect(p.sections.every(s => /[A-Za-z]/.test(s.header))).toBe(true) // no bullet-only "-" headers
+  })
+
+  it('captures the currency section even when titled "Item Changes"', () => {
+    expect(has(p.categories.currency, /Exalted and Regal Orbs/)).toBe(true)
+  })
+
+  it('keeps multi-line <li> content as one section\'s lines, not a new header', () => {
+    expect(has(p.categories.mechanics, /astral copy of the area/)).toBe(true)
+    expect(has(p.categories.skills, /Divine Blast/)).toBe(true)
+  })
+})

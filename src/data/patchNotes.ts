@@ -9,6 +9,10 @@
  */
 import { fetchText, type FetchJsonOptions } from './fetchJson'
 
+/** GGG news/forum HTML has historically 403'd the default tool UA — a browser UA gets through
+ *  (the same win proven on poewiki Cargo). Callers can still override via `opts.headers`. */
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+
 export interface PatchNoteSource {
   /** Display version, e.g. "3.28.0". */
   version: string
@@ -37,6 +41,6 @@ export async function getPatchNotesRaw(versionOrUrl: string, opts?: FetchJsonOpt
   if (!/^https?:\/\//i.test(url)) {
     throw new Error(`getPatchNotesRaw: "${versionOrUrl}" is not a known version key or a URL`)
   }
-  const raw = await fetchText(url, opts)
+  const raw = await fetchText(url, { ...opts, headers: { 'User-Agent': BROWSER_UA, ...opts?.headers } })
   return { source: known ?? null, raw }
 }
