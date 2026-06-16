@@ -39,7 +39,7 @@ export type MethodSpec =
   | { kind: 'bench'; benchMods: string[] }
   | { kind: 'multimod'; benchMods: string[] }
   | { kind: 'slam'; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number }
-  | { kind: 'harvest'; craft: 'reforge' | 'augment' | 'remove'; tag: string }
+  | { kind: 'harvest'; craft: 'reforge' | 'augment'; tag: string }
   | { kind: 'eldritch-implicit'; tier?: 'lesser' | 'greater' | 'grand' | 'exceptional'; implicitTier?: number }
   | { kind: 'eldritch-exalt'; dominant: 'exarch' | 'eater' }
   | { kind: 'eldritch-annul'; dominant: 'exarch' | 'eater' }

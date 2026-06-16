@@ -24,14 +24,13 @@ const rancourParams: ModuleParams = { desired: [minionTarget], method: { kind: '
 const rare = (over: Partial<Parameters<typeof newItemState>[0]> = {}): ItemState =>
   newItemState({ base: 'Vaal Regalia', itemClass: 'Body Armour', ilvl: 84, tags: ['body_armour', 'default'], ...over })
 const lifeTarget = { slot: 'prefix' as const, group: 'IncreasedLife', label: 'Increased Life' }
-const params = (craft: 'reforge' | 'augment' | 'remove'): ModuleParams => ({ desired: [lifeTarget], method: { kind: 'harvest', craft, tag: 'life' } })
+const params = (craft: 'reforge' | 'augment'): ModuleParams => ({ desired: [lifeTarget], method: { kind: 'harvest', craft, tag: 'life' } })
 
 describe('Harvest data (3.28)', () => {
-  it('maps life → Wild lifeforce and exposes confirmed/low confidence', () => {
+  it('maps life → Wild lifeforce with Cargo-confirmed amounts', () => {
     expect(LIFEFORCE_BY_TAG.life).toBe('Wild')
     expect(harvestCraft('reforge', 'fire')?.costConfidence).toBe('confirmed') // 50 Wild (Cargo)
     expect(harvestCraft('reforge', 'life')).toMatchObject({ amount: 75, costConfidence: 'confirmed' }) // Cargo-confirmed
-    expect(harvestCraft('remove', 'life')?.costConfidence).toBe('low') // no standalone remove craft in Cargo
     expect(harvestCraft('augment', 'life')).toMatchObject({ colour: 'Wild', amount: 17500, sacred: 1 })
   })
 })
@@ -69,13 +68,6 @@ describe('Harvest module on the interface', () => {
     expect(blocked.outcomes[0].p).toBe(1)
     const open = harvestModule.outcomes([rare()] as InputSet, data, params('augment'))
     expect(open.outcomes.length).toBe(2) // hit + miss
-  })
-
-  it('remove-tag is deterministic (fixed lifeforce step)', () => {
-    const r = harvestModule.evaluate([rare()] as InputSet, data, { desired: [], method: { kind: 'harvest', craft: 'remove', tag: 'life' } })
-    expect(r.supported).toBe(true)
-    expect(r.expectedAttempts).toBe(1)
-    expect(r.blueprint!.steps[0].kind).toBe('fixed')
   })
 
   it('Crystallised Rancour reforge (Mirage) is league-gated + folds Rancour into the step cost', () => {

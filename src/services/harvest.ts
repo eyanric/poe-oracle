@@ -61,16 +61,6 @@ function evaluateHarvest(state: ItemState, data: CraftDataContext, params: Modul
     notes.push('Harvest reforge RESPECTS "cannot be changed" — it rerolls only the unlocked side; the locked side is kept (safe).')
   }
 
-  // ── remove: deterministic ────────────────────────────────────────────────
-  if (m.craft === 'remove') {
-    return {
-      method: `harvest remove ${def.tag}`, supported: true, expectedAttempts: 1, perAttemptProb: 1,
-      consumables: [], lowConfidence: true,
-      blueprint: { label: 'harvest', steps: [{ kind: 'fixed', label: `Harvest remove ${def.tag}`, consumable: { name: lifeforce, category: 'currency' }, qty: def.amount }] },
-      notes,
-    }
-  }
-
   if (!desired) return fail(`Harvest ${m.craft} needs a target mod`)
   const slot = desired.slot
 

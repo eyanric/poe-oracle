@@ -43,7 +43,7 @@ export function registerCraftCostTool(server: McpServer): void {
         benchMods: z.array(z.string()).optional().describe('Required for method=bench/multimod: bench-craft search terms, e.g. ["maximum Life", "Fire Resistance"].'),
         protect: z.enum(['prefixes', 'suffixes']).optional().describe('method=slam: lock this affix side (cannot be changed) so a miss is recoverable, not a brick.'),
         baseValueChaos: z.number().optional().describe('method=slam: chaos value of the base being slammed (the value-at-risk if it bricks).'),
-        harvestCraft: z.enum(['reforge', 'augment', 'remove']).optional().describe('Required for method=harvest: reforge-with-tag / augment-with-tag / remove-tag.'),
+        harvestCraft: z.enum(['reforge', 'augment']).optional().describe('Required for method=harvest: reforge-with-tag / augment-with-tag (add-and-remove-random). Standalone targeted remove no longer exists in PoE.'),
         harvestTag: z.string().optional().describe('Required for method=harvest: the mod tag, e.g. "life", "fire", "caster".'),
         eldritchTier: z.enum(['lesser', 'greater', 'grand', 'exceptional']).optional().describe('method=eldritch-implicit: ember/ichor tier (default exceptional = full pool). Side is the desired mod slot (prefix=Exarch, suffix=Eater).'),
         eldritchImplicitTier: z.number().optional().describe('method=eldritch-implicit: pin a value tier (1=highest).'),
@@ -258,7 +258,7 @@ function toMethodSpec(
   method: string,
   o: {
     essenceName?: string; fossilNames?: string[]; benchMods?: string[]; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number;
-    harvestCraft?: 'reforge' | 'augment' | 'remove'; harvestTag?: string;
+    harvestCraft?: 'reforge' | 'augment'; harvestTag?: string;
     eldritchTier?: 'lesser' | 'greater' | 'grand' | 'exceptional'; eldritchImplicitTier?: number; dominant?: 'exarch' | 'eater';
     addInfluence?: 'shaper' | 'elder' | 'crusader' | 'redeemer' | 'hunter' | 'warlord';
     catalyst?: 'abrasive' | 'accelerating' | 'fertile' | 'imbued' | 'intrinsic' | 'noxious' | 'prismatic' | 'tempering' | 'turbulent' | 'sinistral' | 'dextral'; quality?: number;

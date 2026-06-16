@@ -67,7 +67,7 @@ export type CraftMethod =
   | { kind: 'bench'; benchMods: string[] }
   | { kind: 'multimod'; benchMods: string[] }
   | { kind: 'slam'; protect?: 'prefixes' | 'suffixes'; baseValueChaos?: number }
-  | { kind: 'harvest'; craft: 'reforge' | 'augment' | 'remove'; tag: string }
+  | { kind: 'harvest'; craft: 'reforge' | 'augment'; tag: string }
   | { kind: 'recombine' }
   /** Roll a specific eldritch implicit. `tier` picks the ember/ichor (default exceptional);
    *  `implicitTier` optionally pins a value tier (1=highest). Side = desired slot (prefix=Exarch). */

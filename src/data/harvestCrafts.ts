@@ -10,13 +10,14 @@
  *   - Lifeforce colour → mod-tag mapping: CONFIRMED against the Cargo per-craft colour costs.
  *   - Per-craft lifeforce AMOUNTS: now CONFIRMED from Cargo (reforge 50/75/100/150 by tag; augment
  *     15000/17500/20000 + 1 Sacred). Lifeforce is live-priceable (poe.ninja) — amounts × live price flow
- *     through economy. Only the standalone `remove` craft stays flagged (not present in the Cargo set).
+ *     through economy. The standalone targeted "remove a [tag] mod" craft no longer exists (gone from the
+ *     game; only the random removal bundled into the add/remove augment remains).
  *
  * Consume DATA (game facts), not GPL code. Pure module (static tables).
  */
 
 export type LifeforceColour = 'Vivid' | 'Primal' | 'Wild' | 'Sacred'
-export type HarvestCraftKind = 'reforge' | 'augment' | 'remove'
+export type HarvestCraftKind = 'reforge' | 'augment'
 
 /** Lifeforce item names as they appear in the economy (poe.ninja / poe.watch). */
 export const LIFEFORCE_ITEM: Record<LifeforceColour, string> = {
@@ -113,13 +114,10 @@ export function harvestCraft(kind: HarvestCraftKind, tag: string): HarvestCraft 
     const amount = REFORGE_AMOUNT[t]
     return { kind, tag: t, colour, amount: amount ?? 75, costConfidence: amount != null ? 'confirmed' : 'low' }
   }
-  if (kind === 'augment') {
-    const amount = AUGMENT_AMOUNT[t]
-    return { kind, tag: t, colour, amount: amount ?? 17500, sacred: 1, costConfidence: amount != null ? 'confirmed' : 'low' }
-  }
-  // ⚠ remove [tag] — NO standalone "remove a random X" craft in the current Cargo set (removal is
-  // bundled into the augment "add and remove another"). Representative + flagged; verify if needed.
-  return { kind, tag: t, colour, amount: 30, costConfidence: 'low' }
+  // augment = add-a-[tag]-and-remove-a-random-other (the only forcing craft; standalone targeted
+  // "remove a [tag] mod" no longer exists in PoE — removal is only the random one bundled here).
+  const amount = AUGMENT_AMOUNT[t]
+  return { kind, tag: t, colour, amount: amount ?? 17500, sacred: 1, costConfidence: amount != null ? 'confirmed' : 'low' }
 }
 
 export const HARVEST_PROVENANCE =
@@ -129,4 +127,4 @@ export const HARVEST_PROVENANCE =
   'caster/defence/chaos(17500), critical/speed(20000)+1 Sacred — all Cargo-confirmed. No "reforge keeping ' +
   'prefixes/suffixes" (removed). Crystallised Rancour (Mirage-only) reforges minion(200 Primal+3)/' +
   'attribute(200 Vivid+2)/mana(200 Primal+2) — amounts Cargo-confirmed; availability Mirage-gated. ' +
-  'Standalone "remove [tag]" craft NOT in the current Cargo set (removal bundled into augment) — flagged.'
+  'Standalone targeted "remove [tag]" craft removed from the game (only the augment\'s random removal remains).'
