@@ -152,6 +152,20 @@ export function priceUniqueForBuild(name: string, mods: string[], snapshot: Econ
   return { match: pick, lowConfidence: pick.lowConfidence }
 }
 
+/**
+ * Fallback for an UNREGISTERED unique (no variant extractor): the cheapest CONFIDENT same-name listing
+ * — a floor, never the priciest. `ambiguous` is true when the name spans several variants (so the
+ * caller flags low-confidence — we couldn't pin which one the build runs). null ⇒ no live listing.
+ */
+function cheapestConfidentUnique(name: string, snapshot: EconomySnapshot): { match: PriceMatch; ambiguous: boolean } | null {
+  const cands = searchEconomy(snapshot, name, 'unique', 500).filter(c => baseNameOf(c.name) === name && c.chaosValue > 0)
+  if (!cands.length) return null
+  const ambiguous = new Set(cands.map(c => parenOf(c.name) ?? '')).size > 1
+  const confident = cands.filter(c => !c.lowConfidence)
+  const match = (confident.length ? confident : cands).sort((a, b) => a.chaosValue - b.chaosValue)[0]
+  return { match, ambiguous }
+}
+
 export function estimateBuildCost(items: GearPiece[], deps: BuildCostDeps): BuildCostEstimate {
   const stampDate = deps.today ?? new Date().toISOString().slice(0, 10)
   const divineChaos = divineChaosOf(deps.snapshot)
@@ -171,6 +185,14 @@ export function estimateBuildCost(items: GearPiece[], deps: BuildCostDeps): Buil
         if (!vp.match) return { slot: it.slot, name: it.name, qty, chaos: null, divine: null, lowConfidence: true, note: vp.note }
         return { ...priced(vp.match, qty, it.slot, it.name, vp.lowConfidence), variant: parenOf(vp.match.name) ?? undefined }
       }
+    }
+    // Unregistered / un-extractable unique → can't pin the variant, so use the CHEAPEST confident
+    // listing (a floor — not the priciest), flagged low-confidence when the name has several variants.
+    if (it.category === 'unique') {
+      const fb = cheapestConfidentUnique(it.name, deps.snapshot)
+      if (!fb) return { slot: it.slot, name: it.name, qty, chaos: null, divine: null, lowConfidence: true, note: 'no live price (rare/unindexed?)' }
+      const p = priced(fb.match, qty, it.slot, it.name, fb.match.lowConfidence || fb.ambiguous)
+      return fb.ambiguous ? { ...p, note: 'variant not identified — cheapest listing (floor)' } : p
     }
     const m = searchEconomy(deps.snapshot, it.name, it.category, 1)[0]
     if (!m || m.chaosValue <= 0) {
