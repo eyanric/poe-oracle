@@ -34,6 +34,22 @@ const IMPLICIT_TAGS = new Set(['implicit', 'searing exarch', 'eater of worlds'])
 const NON_EXPLICIT_TAGS = new Set(['enchant', 'implicit', 'scourge', 'searing exarch', 'eater of worlds'])
 const METADATA_RE = /^(Corrupted|Mirrored|Unidentified|Split|Shaper Item|Elder Item|Crusader Item|Warlord Item|Hunter Item|Redeemer Item|Synthesised Item|Fractured Item|Scouring Lock)$/i
 const KNOWN_PROPERTY_RE = /^(Requirements|Level|Strength|Dexterity|Intelligence|Sockets|Quality|Map Tier|Stack Size|Item Level|Gem Tags|Cost|Experience):/
+// PoB EXPORT items carry no `--------` dividers, so these metadata lines sit inline right after Rarity
+// and must never be mistaken for the item name or base type. (Clipboard items section them off; export
+// items don't.) Each is colon-anchored so a real name/base — which has no leading marker — is untouched.
+const POB_HEADER_META_RE = /^(Unique ID|LevelReq|Implicits|Variant|Selected Variant|Crafted|Prefix|Suffix):/i
+
+function isHeaderMetadata(line: string): boolean {
+  return (
+    KNOWN_PROPERTY_RE.test(line) ||
+    METADATA_RE.test(line) ||
+    POB_HEADER_META_RE.test(line) ||
+    /^(Shaper|Elder|Crusader|Redeemer|Hunter|Warlord) Item$/.test(line) ||
+    line.startsWith('*') ||
+    /^\(.*\)$/.test(line) ||
+    /^\{.*\}$/.test(line)
+  )
+}
 
 type ParsedTaggedLine = {
   text: string
@@ -93,21 +109,38 @@ function applyHeader(item: ParsedClipboardItem, header: string[]): void {
   const rarityIdx = header.findIndex(line => line.startsWith('Rarity:'))
   if (rarityIdx === -1) return
 
-  const afterRarity = header.slice(rarityIdx + 1).map(line => line.trim()).filter(Boolean)
-  if (item.rarity === 'Rare' || item.rarity === 'Unique') {
-    item.name = afterRarity[0] ?? ''
-    item.baseType = afterRarity[1] ?? ''
-    return
+  // Name/base are the CONTIGUOUS content lines right after Rarity, terminated by the first
+  // metadata/property line. PoB export has no `--------` dividers, so it inlines Unique ID:/Item Level:/
+  // Implicits: then the mods; stopping at the first metadata line keeps a mod (when an item has no base
+  // line) out of the base, and keeps `Unique ID:` etc. out of either field. (Export rarity is UPPERCASE,
+  // so match case-insensitively; otherwise Magic/Normal — a single combined name line — would fall to the
+  // two-line branch and read the following metadata line as the base.)
+  const candidates: string[] = []
+  for (const raw of header.slice(rarityIdx + 1)) {
+    const line = raw.trim()
+    if (!line) continue
+    if (isHeaderMetadata(line)) break
+    candidates.push(line)
+    if (candidates.length === 2) break
   }
 
-  if (item.rarity === 'Magic' || item.rarity === 'Normal') {
-    item.baseType = afterRarity[0] ?? ''
+  const rarity = item.rarity.toLowerCase()
+  if (rarity === 'magic' || rarity === 'normal') {
+    item.baseType = candidates[0] ?? ''
     item.name = item.baseType
     return
   }
 
-  item.name = afterRarity[0] ?? ''
-  item.baseType = afterRarity[1] ?? item.name
+  if (rarity === 'rare' || rarity === 'unique') {
+    item.name = candidates[0] ?? ''
+    // No valid base line → leave it empty (downstream treats an empty base as unpriced); never emit a
+    // metadata string as a base.
+    item.baseType = candidates[1] ?? ''
+    return
+  }
+
+  item.name = candidates[0] ?? ''
+  item.baseType = candidates[1] ?? item.name
 }
 
 function applySectionProperty(item: ParsedClipboardItem, line: string): boolean {
