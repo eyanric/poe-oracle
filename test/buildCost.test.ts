@@ -65,6 +65,52 @@ describe('estimateBuildCost', () => {
   })
 })
 
+describe('variant-matched unique pricing (build-cost-local)', () => {
+  // A snapshot where each multi-variant unique lists every variant as a parenthetical in `name`,
+  // priced so the WRONG pick (max) is obvious. lowConfidence marks thin/outlier variants.
+  const VSNAP: EconomySnapshot = {
+    league: 'Mirage', fetchedAt: Date.now(), source: 'test',
+    currency: [cur('Divine Orb', 500)], fragments: [], essences: [], divCards: [],
+    uniqueWeapons: [], uniqueArmours: [], uniqueFlasks: [], skillGems: [], maps: [], scarabs: [], oils: [],
+    uniqueAccessories: [
+      { name: 'Screams of the Desiccated (Echoing)', baseType: 'belt', chaosValue: 50000, divineValue: 100, listingCount: 20, source: 'test' },
+      { name: 'Screams of the Desiccated (Acceleration, Impenetrable)', baseType: 'belt', chaosValue: 3000, divineValue: 6, listingCount: 8, source: 'test' },
+    ],
+    uniqueJewels: [
+      { name: 'Voices (1 passives)', baseType: 'jewel', chaosValue: 100000, divineValue: 200, listingCount: 30, source: 'test' },
+      { name: 'Voices (3 passives)', baseType: 'jewel', chaosValue: 200, divineValue: 0.4, listingCount: 40, source: 'test' },
+      { name: 'Thread of Hope (Very Large)', baseType: 'jewel', chaosValue: 5000, divineValue: 10, listingCount: 70, source: 'test' },
+      { name: 'Thread of Hope (Large)', baseType: 'jewel', chaosValue: 900, divineValue: 1.8, listingCount: 70, source: 'test' },
+      { name: 'Forbidden Flesh (Avatar of the Wilds)', baseType: 'jewel', chaosValue: 100, divineValue: 0.2, listingCount: 12, source: 'test' },
+    ],
+  }
+  const vdeps: BuildCostDeps = { snapshot: VSNAP, league: 'Mirage', today: '2026-06-17' }
+  const price = (name: string, mods: string[]) =>
+    estimateBuildCost([{ slot: 's', name, category: 'unique', mods }], vdeps).pieces[0]
+
+  it('(a) picks the variant the build runs — Thread of Hope radius, not the priciest', () => {
+    const p = price('Thread of Hope', ['Only affects Passives in Large Ring', '-17% to all Elemental Resistances'])
+    expect(p.variant).toBe('Large')
+    expect(p.chaos).toBe(900) // not the 5000 (Very Large) max
+  })
+  it('(b) an absent variant is unpriced + flagged, never substituted', () => {
+    const p = price('Forbidden Flesh', ['Allocates Unleashed Potential if you have the matching modifier on Forbidden Flame', 'Corrupted'])
+    expect(p.chaos).toBeNull()
+    expect(p.lowConfidence).toBe(true)
+    expect(p.note).toMatch(/unleashed potential.*not listed/i)
+  })
+  it('(c) Screams two-token shrine-buff label matched UNORDERED', () => {
+    const p = price('Screams of the Desiccated', ['You have Impenetrable Shrine Buff while affected by no Flasks', 'You have Acceleration Shrine Buff while affected by no Flasks'])
+    expect(p.variant).toBe('Acceleration, Impenetrable')
+    expect(p.chaos).toBe(3000) // not the 50000 (Echoing) max; matched despite reversed mod order
+  })
+  it('(d) Voices numeric label matched (not string-equal)', () => {
+    const p = price('Voices', ['Adds 3 Jewel Socket Passive Skills', 'Adds 1 Small Passive Skill which grants nothing'])
+    expect(p.variant).toBe('3 passives')
+    expect(p.chaos).toBe(200) // not the 100000 (1 passives) max
+  })
+})
+
 describe('gearListFromPob → build cost (Phase 3 integration)', () => {
   const endgame = parsePobCode(
     readFileSync(fileURLToPath(new URL('./fixtures/pob-endgame.txt', import.meta.url)), 'utf8'),
